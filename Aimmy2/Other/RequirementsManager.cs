@@ -35,12 +35,12 @@ namespace Aimmy2.Other
 
             if (!IsCUDAInstalled())
             {
-                MessageBox.Show("You don't have 12.6 CUDA Installed (or its improper install), you may not be able to use Aimmy.", "Aimmy");
+                MessageBox.Show("You don't have 12.x CUDA Installed (or its improper install), you may not be able to use Aimmy.", "Aimmy");
             }
 
             if (!IsCUDNNInstalled())
             {
-                MessageBox.Show("You don't have 9.3 CUDNN Installed (or its improper install), you may not be able to use Aimmy.", "Aimmy");
+                MessageBox.Show("You don't have 9.x CUDNN Installed (or its improper install), you may not be able to use Aimmy.", "Aimmy");
                 return false;
             }
 
@@ -67,26 +67,48 @@ namespace Aimmy2.Other
         {
             try
             {
-                string directory = @"C:\Program Files\NVIDIA GPU Computing Toolkit\CUDA\v12.6\bin";
+                string baseDirectory = @"C:\Program Files\NVIDIA GPU Computing Toolkit\CUDA";
                 string envCudaPath = Environment.GetEnvironmentVariable("CUDA_PATH") ?? "";
 
-                if (Directory.Exists(directory) || envCudaPath == directory)
+                if (Directory.Exists(baseDirectory))
                 {
-                    FileManager.LogInfo("CUDA 12.6 is installed");
+                    var cudaDirectories = Directory.GetDirectories(baseDirectory, "v12.*");
+
+                    foreach (var directory in cudaDirectories)
+                    {
+                        if (Directory.Exists(Path.Combine(directory, "bin")))
+                        {
+                            FileManager.LogInfo($"CUDA 12.x found in directory: {directory}");
+                            return true;
+                        }
+                    }
+                }
+
+                //maybe they installed it on a different harddrive, or what if they wanna be different and change their local drive from C to D
+                if (!string.IsNullOrEmpty(envCudaPath) && envCudaPath.Contains("CUDA\\v12."))
+                {
+                    FileManager.LogInfo("CUDA 12.x found via CUDA_PATH environment variable.");
                     return true;
                 }
 
+                string registryBasePath = @"SOFTWARE\NVIDIA Corporation\GPU Computing Toolkit\CUDA";
+                using var baseKey = Registry.LocalMachine.OpenSubKey(registryBasePath);
 
-                //maybe they installed it on a different harddrive, or what if they wanna be different and change their local drive from C to D
-                string keyPath = @"SOFTWARE\NVIDIA Corporation\GPU Computing Toolkit\CUDA\v12.6";
-                using var key = Registry.LocalMachine.OpenSubKey(keyPath);
-
-                object? installedValue = key?.GetValue("64BitInstalled");
-
-                if (installedValue != null && (int)installedValue == 1)
+                if (baseKey != null)
                 {
-                    FileManager.LogInfo("CUDA 12.6 is installed");
-                    return true;
+                    var versionKeys = baseKey.GetSubKeyNames()
+                                             .Where(name => name.StartsWith("v12."));
+                    foreach (var versionKey in versionKeys)
+                    {
+                        using var key = baseKey.OpenSubKey(versionKey);
+                        object? installedValue = key?.GetValue("64BitInstalled");
+
+                        if (installedValue != null && (int)installedValue == 1)
+                        {
+                            FileManager.LogInfo($"CUDA {versionKey} is installed as per registry.");
+                            return true;
+                        }
+                    }
                 }
 
                 string[] dlls =
@@ -129,37 +151,45 @@ namespace Aimmy2.Other
         {
             try
             {
-                string directory = @"C:\Program Files\NVIDIA\CUDNN\v9.3\bin";
+                string cudnnDirectoryBase = @"C:\Program Files\NVIDIA\CUDNN";
+                string aimmyDirectory = AppDomain.CurrentDomain.BaseDirectory;
 
-                if (Directory.Exists(directory) ||
-                    Directory.Exists(directory + "\\12.6"))
+                // Check if there's a folder starting with "v9." in the NVIDIA CUDNN directory
+                if (Directory.Exists(cudnnDirectoryBase))
                 {
-                    FileManager.LogInfo("CUDNN 9.3 is installed");
-                    return true;
+                    var cudnnDirectories = Directory.GetDirectories(cudnnDirectoryBase, "v9.*");
+
+                    foreach (var directory in cudnnDirectories)
+                    {
+                        if (Directory.Exists(Path.Combine(directory, "bin")))
+                        {
+                            FileManager.LogInfo($"cuDNN 9.x found in directory: {directory}");
+                            return true;
+                        }
+                    }
                 }
 
-                if(File.Exists(Path.Combine(AppDomain.CurrentDomain.BaseDirectory +  "cudnn64_9.dll"))) {
-                    FileManager.LogInfo("CUDNN 9.3 was found in aimmy directory.");
+                if (File.Exists(Path.Combine(aimmyDirectory, "cudnn64_9.dll")))
+                {
+                    FileManager.LogInfo("cuDNN 9.x was found in the Aimmy directory.");
                     return true;
                 }
 
                 // maybe they installed it on a different harddrive, or what if they wanna be different and change their local drive from C to D
                 string path = Environment.GetEnvironmentVariable("PATH") ?? "";
 
-                if (string.IsNullOrEmpty(path)) return false;
-
-                if (path.Contains("CUDNN\\v9.3"))
+                if (!string.IsNullOrEmpty(path) && path.Contains("CUDNN\\v9."))
                 {
-                    FileManager.LogInfo("CUDNN 9.3 may be installed"); // could be in CUDNN/v9.3 or CUDNN/v9.3/12.6
-                    return true; //maybe.
+                    FileManager.LogInfo("cuDNN 9.x may be installed and referenced in PATH.");
+                    return true;
                 }
 
-                FileManager.LogError("CUDNN 9.3 is not installed");
+                FileManager.LogError("CUDNN 9.x is not installed");
                 return false;
             }
             catch (Exception ex)
             {
-                FileManager.LogError($"Error while checking for CUDNN 9.3: {ex}");
+                FileManager.LogError($"Error while checking for CUDNN: {ex}");
                 return false;
             }
         }
@@ -175,19 +205,29 @@ namespace Aimmy2.Other
                     "nvinfer_plugin_10.dll",
                     "nvonnxparser_10.dll",
                     ];
-                string baseDirectory = @"C:\Program Files\NVIDIA GPU Computing Toolkit\CUDA\v12.6\bin";
+                string baseDirectory = @"C:\Program Files\NVIDIA GPU Computing Toolkit\CUDA";
                 string exeDirectory = AppDomain.CurrentDomain.BaseDirectory;
 
                 bool dllExists = false;
 
                 foreach (string dll in dlls)
                 {
-                    if (File.Exists(baseDirectory + "\\" + dll))
+                    // Search through CUDA directories for any version containing the DLLs
+                    if (Directory.Exists(baseDirectory))
                     {
-                        FileManager.LogInfo($"Found TensorRT DLL {dll}");
-                        dllExists = true;
+                        var cudaDirectories = Directory.GetDirectories(baseDirectory, "v*");
+                        foreach (var directory in cudaDirectories)
+                        {
+                            if (File.Exists(Path.Combine(directory, "bin", dll)))
+                            {
+                                FileManager.LogInfo($"Found TensorRT DLL {dll} in {directory}\\bin");
+                                dllExists = true;
+                            }
+                        }
                     }
-                    else if (File.Exists(Path.Combine(exeDirectory, dll)))
+
+                    // Check if the DLL is in the application's executable directory
+                    if (File.Exists(Path.Combine(exeDirectory, dll)))
                     {
                         FileManager.LogInfo($"Found TensorRT DLL {dll} in executable directory");
                         dllExists = true;
@@ -204,19 +244,19 @@ namespace Aimmy2.Other
 
                 string path = Environment.GetEnvironmentVariable("PATH") ?? "";
 
-                if (string.IsNullOrEmpty(path)) return false;
-
-                if (path.Contains("TensorRT-10.3.0.26") || path.Contains("TensorRT"))
+                if (!string.IsNullOrEmpty(path) && path.Contains("TensorRT"))
                 {
-                    FileManager.LogInfo("TensorRT 10.3.0 may be installed", true, 1000);
-                    return true; //maybe.
+                    FileManager.LogInfo("TensorRT may be installed based on PATH environment variable.");
+                    return true;
                 }
 
+
+                FileManager.LogError("TensorRT not found.");
                 return false;
             }
             catch (Exception ex)
             {
-                FileManager.LogError($"Error while checking for TensorRT 10.3.0: {ex}");
+                FileManager.LogError($"Error while checking for TensorRT: {ex}");
                 return false;
             }
         }

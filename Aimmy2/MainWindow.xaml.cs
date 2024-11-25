@@ -110,12 +110,14 @@ namespace Aimmy2
 
             uiManager.DDI_TensorRT.Selected += OnExecutionProviderSelected;
             uiManager.DDI_CUDA.Selected += OnExecutionProviderSelected;
+            //uiManager.DDI_DirectML.Selected += OnExecutionProviderSelected;
+            uiManager.DDI_CPU.Selected += OnExecutionProviderSelected;
 
             LoadMenuMinimizers();
             VisibilityXY();
 
             ActualFOV = Dictionary.sliderSettings["FOV Size"];
-            PropertyChanger.ReceiveNewConfig = (configPath, load) => FileManager.LoadConfig(uiManager);
+            PropertyChanger.ReceiveNewConfig = (configPath, load) => FileManager.LoadConfig(uiManager, configPath, true);
 
             PropertyChanger.PostNewFOVSize(Dictionary.sliderSettings["FOV Size"]);
             PropertyChanger.PostColor((Color)ColorConverter.ConvertFromString(Dictionary.colorState["FOV Color"]));
@@ -287,9 +289,11 @@ namespace Aimmy2
             };
             uiManager.D_ExecutionProvider!.DropdownBox.SelectedIndex = Dictionary.dropdownState["Execution Provider Type"] switch
             {
+                //"DirectML" => 0,
                 "CUDA" => 0,
                 "TensorRT" => 1,
-                _ => 0 // Default case if none of the above matches
+                "CPU" => 2,
+                _ => 0 // Default to CUDA
             };
         }
         static void OnExecutionProviderSelected(object sender, RoutedEventArgs e)
@@ -849,8 +853,10 @@ namespace Aimmy2
             };
 
             uiManager.D_ExecutionProvider = AddDropdown(SettingsConfig, "Execution Provider Type");
+            //uiManager.DDI_DirectML = AddDropdownItem(uiManager.D_ExecutionProvider, "DirectML");
             uiManager.DDI_CUDA = AddDropdownItem(uiManager.D_ExecutionProvider, "CUDA");
             uiManager.DDI_TensorRT = AddDropdownItem(uiManager.D_ExecutionProvider, "TensorRT");
+            uiManager.DDI_CPU = AddDropdownItem(uiManager.D_ExecutionProvider, "CPU");
 
 
 

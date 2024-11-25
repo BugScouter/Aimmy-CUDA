@@ -176,7 +176,7 @@ namespace Aimmy2.Other
                 }
             }
         }
-#endregion
+        #endregion
         #region models
         public static bool CurrentlyLoadingModel = false;
 
@@ -223,7 +223,7 @@ namespace Aimmy2.Other
                 LogError($"Model path doesn't exist: {modelPath}", true);
                 return;
             }
-            
+
             // Check if the model is already selected or currently loading
             if (Dictionary.lastLoadedModel == selectedModel.Name || CurrentlyLoadingModel) return;
 
@@ -235,7 +235,7 @@ namespace Aimmy2.Other
             var model_ = _modelItems.FirstOrDefault(m => m.Name == selectedModelName);
             if (model_ != null)
             {
-                
+
                 model_.IsLoading = true;
             }
 
@@ -364,11 +364,21 @@ namespace Aimmy2.Other
         public static void LoadConfig(UI uiManager, string path = "bin\\configs\\Default.cfg", bool loading_from_configlist = false)
         {
             SaveDictionary.LoadJSON(Dictionary.sliderSettings, path);
+            //LogInfo(path);
+            //LogInfo(string.Join(", ", Dictionary.sliderSettings.Values));
             try
             {
                 if (loading_from_configlist)
                 {
-                    if (Dictionary.sliderSettings["Suggested Model"] != "N/A" || Dictionary.sliderSettings["Suggested Model"] != "")
+                    //LogInfo("Loading From Config List");
+
+                    if (uiManager == null)
+                    {
+                        LogError("UI Manager is null");
+                        return;
+                    }
+
+                    if (Dictionary.sliderSettings["Suggested Model"] != "N/A" && Dictionary.sliderSettings["Suggested Model"] != "")
                     {
                         MessageBox.Show(
                             "The creator of this model suggests you use this model:\n" +
@@ -395,13 +405,10 @@ namespace Aimmy2.Other
 
                     uiManager.S_EMASmoothing!.Slider.Value = Dictionary.GetValueOrDefault(Dictionary.sliderSettings, "EMA Smoothening", 0.5);
 
-                    uiManager.S_AutoTriggerDelay!.Slider.Value = Dictionary.GetValueOrDefault(Dictionary.sliderSettings, "Auto Trigger Delay", 0.1);
-
                     uiManager.S_DPOpacity!.Slider.Value = Dictionary.GetValueOrDefault(Dictionary.sliderSettings, "Opacity", 1);
                     uiManager.S_DPCornerRadius!.Slider.Value = Dictionary.GetValueOrDefault(Dictionary.sliderSettings, "Corner Radius", 0);
                     uiManager.S_DPBorderThickness!.Slider.Value = Dictionary.GetValueOrDefault(Dictionary.sliderSettings, "Border Thickness", 1);
                     uiManager.S_DPFontSize!.Slider.Value = Dictionary.GetValueOrDefault(Dictionary.sliderSettings, "AI Confidence Font Size", 20);
-
                 }
             }
 

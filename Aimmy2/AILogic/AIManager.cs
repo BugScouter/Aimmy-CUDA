@@ -259,13 +259,13 @@ namespace Aimmy2.AILogic
                     (ex.Message.Contains("LoadLibrary failed with error 126") && ex.Message.Contains("onnxruntime_providers_tensorrt.dll")))
                 {
                     if (RequirementsManager.IsTensorRTInstalled())
-                    {
+                    { // TensorRT should be preinstalled in all aimmy cuda versions, so this should be rare unless user has personally deleted the files.
                         message = "TensorRT has been found by Aimmy, but not by ONNX. Please check your configuration.\nHint: Check CUDNN and your CUDA, and install dependencies to PATH correctly.";
                         title = "Configuration Error";
                     }
                     else
                     {
-                        message = "TensorRT execution provider has not been found on your build. Please check your configuration.\nHint: Download TensorRT 10.3.0 and install the LIB folder to path.";
+                        message = "TensorRT execution provider has not been found on your build. Please check your configuration.\nHint: Download TensorRT 10.3.x and install the LIB folder to path.";
                         title = "TensorRT Error";
                     }
                 }
@@ -279,7 +279,7 @@ namespace Aimmy2.AILogic
                     }
                     else
                     {
-                        message = "CUDA execution provider has not been found on your build. Please check your configuration.\nHint: Download CUDA 12.6. Then install CUDNN 9.3 to your PATH";
+                        message = "CUDA execution provider has not been found on your build. Please check your configuration.\nHint: Download CUDA 12.x. Then install CUDNN 9.x to your PATH (or install the DLL included aimmy)";
                         title = "CUDA Error";
                     }
                 }
@@ -406,7 +406,7 @@ namespace Aimmy2.AILogic
         #endregion
         #region AI Loop Functions
         #region misc
-        private async Task AutoTrigger()
+        private static async Task AutoTrigger()
         {
             if (Dictionary.toggleState["Auto Trigger"] &&
                 (InputBindingManager.IsHoldingBinding("Aim Keybind") ||
