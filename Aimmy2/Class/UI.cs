@@ -92,6 +92,7 @@ namespace Aimmy2.Class
         public ADropdown? D_ExecutionProvider { get; set; }
         public ComboBoxItem? DDI_CUDA { get; set; }
         public ComboBoxItem? DDI_TensorRT { get; set; }
+        public ComboBoxItem? DDI_CPU { get; set; }
         public ComboBoxItem? DDI_LGHUB { get; set; }
         public ComboBoxItem? DDI_RazerSynapse { get; set; }
         public ASlider? S_AIMinimumConfidence { get; set; }

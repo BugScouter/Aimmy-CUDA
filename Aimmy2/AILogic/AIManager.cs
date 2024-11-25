@@ -26,31 +26,26 @@ namespace Aimmy2.AILogic
     internal class AIManager : IDisposable
     {
         #region Variables
-
-        private const int IMAGE_SIZE = 640;
         private const int NUM_DETECTIONS = 8400; // Standard for OnnxV8 model (Shape: 1x5x8400)
+        private const int IMAGE_SIZE = 640;
 
         private DateTime lastSavedTime = DateTime.MinValue;
-        private List<string>? _outputNames;
         private RectangleF LastDetectionBox;
         private KalmanPrediction kalmanPrediction;
         private WiseTheFoxPrediction wtfpredictionManager;
 
 
         //Direct3D Variables
-        private ID3D11Device _device;
-        private ID3D11DeviceContext _context;
-        private IDXGIOutputDuplication _outputDuplication;
-        private ID3D11Texture2D _desktopImage;
-        //public IDXGIAdapter1 _selectedAdapter;
+        //private ID3D11Device _device;
+        //private ID3D11DeviceContext _context;
+        //private IDXGIOutputDuplication _outputDuplication;
+        //private ID3D11Texture2D _desktopImage;
 
-        private Bitmap? _captureBitmap;
+        
 
         private int ScreenWidth = WinAPICaller.ScreenWidth;
         private int ScreenHeight = WinAPICaller.ScreenHeight;
 
-        private readonly RunOptions? _modeloptions;
-        private InferenceSession? _onnxModel;
 
         private Thread? _aiLoopThread;
         private bool _isAiLoopRunning;
@@ -85,6 +80,10 @@ namespace Aimmy2.AILogic
 
         //private Graphics? _graphics;
 
+        private readonly ModelManager _modelManager = new();
+        private readonly CaptureManager _captureManager = new();
+
+
         #endregion Variables
 
         public AIManager(string modelPath)
@@ -92,210 +91,12 @@ namespace Aimmy2.AILogic
             kalmanPrediction = new KalmanPrediction();
             wtfpredictionManager = new WiseTheFoxPrediction();
 
-            _modeloptions = new RunOptions();
-
-            var sessionOptions = new SessionOptions
-            {
-                EnableCpuMemArena = true,
-                EnableMemoryPattern = true,
-                GraphOptimizationLevel = GraphOptimizationLevel.ORT_ENABLE_ALL,
-                ExecutionMode = ExecutionMode.ORT_PARALLEL
-
-            };
-
-            SystemEvents.DisplaySettingsChanged += (s, e) =>
-            {
-                if (Dictionary.dropdownState["Screen Capture Method"] == "DirectX")
-                {
-                    ReinitializeD3D11();
-                }
-                else
-                {
-                    _captureBitmap?.Dispose();
-                    _captureBitmap = null;
-                }
-            };
+            SystemEvents.DisplaySettingsChanged += (s, e) => _captureManager.DisplaySettingsChanged();
 
             // Attempt to load via CUDA (else fallback to CPU)
-            Task.Run(() =>
-            {
-                _ = InitializeModel(sessionOptions, modelPath);
-            });
+            Task.Run(() => _modelManager.InitializeModel(modelPath));
 
-            if (Dictionary.dropdownState["Screen Capture Method"] == "DirectX")
-            {
-                InitializeDirectX();
-            }
-        }
-        #region DirectX
-        private void InitializeDirectX()
-        {
-            try
-            {
-                DisposeD311();
-
-                // Initialize Direct3D11 device and context
-                FeatureLevel[] featureLevels = new[]
-                   {
-                        FeatureLevel.Level_12_1,
-                        FeatureLevel.Level_12_0,
-                        FeatureLevel.Level_11_1,
-                        FeatureLevel.Level_11_0,
-                        FeatureLevel.Level_10_1,
-                        FeatureLevel.Level_10_0,
-                        FeatureLevel.Level_9_3,
-                        FeatureLevel.Level_9_2,
-                        FeatureLevel.Level_9_1
-                    };
-                var result = D3D11.D3D11CreateDevice(
-                    null,
-                    DriverType.Hardware,
-                    DeviceCreationFlags.BgraSupport,
-                    featureLevels,
-                    out _device,
-                    out FeatureLevel featureLevel, // DEBUG
-                    out _context
-                );
-                FileManager.LogInfo($"Direct3D11 Feature Level Selected: {featureLevel}");
-                if (result != Result.Ok || _device == null || _context == null)
-                {
-                    throw new InvalidOperationException($"Failed to create Direct3D11 device or context. HRESULT: {result}");
-                }
-
-                using var dxgiDevice = _device.QueryInterface<IDXGIDevice>();
-                using var adapterForOutput = dxgiDevice.GetAdapter();
-                var resultEnum = adapterForOutput.EnumOutputs(0, out var outputTemp);
-                if (resultEnum != Result.Ok || outputTemp == null)
-                {
-                    throw new InvalidOperationException("Failed to enumerate outputs.");
-                }
-
-
-                using var output = outputTemp.QueryInterface<IDXGIOutput1>() ?? throw new InvalidOperationException("Failed to acquire IDXGIOutput1.");
-
-                // Duplicate the output
-                _outputDuplication = output.DuplicateOutput(_device);
-
-                FileManager.LogInfo("Direct3D11 device, context, and output duplication initialized.");
-            }
-            catch (Exception ex)
-            {
-                FileManager.LogError("Error initializing Direct3D11: " + ex);
-            }
-        }
-
-        #endregion
-        #region Models
-
-        private async Task InitializeModel(SessionOptions sessionOptions, string modelPath)
-        {
-            string useCuda = Dictionary.dropdownState["Execution Provider Type"];
-            try
-            {
-                await LoadModelAsync(sessionOptions, modelPath, useCUDA: useCuda == "CUDA");
-            }
-            catch (Exception ex)
-            {
-                try
-                {
-                    FileManager.LogError($"Error starting the model via alternative method: {ex.Message}\n\nFalling back to CUDA, performance may be poor.", true);
-                    await LoadModelAsync(sessionOptions, modelPath, useCUDA: false);
-                }
-                catch (Exception e)
-                {
-                    FileManager.LogError($"Error starting the model via alternative method: {e.Message}, you won't be able to use aim assist at all.", true);
-                }
-            }
-            finally
-            {
-                FileManager.CurrentlyLoadingModel = false;
-            }
-        }
-
-        private Task LoadModelAsync(SessionOptions sessionOptions, string modelPath, bool useCUDA)
-        {
-            try
-            {
-                if (useCUDA)
-                {
-                    FileManager.LogError("loading model with CUDA");
-                    sessionOptions.AppendExecutionProvider_CUDA();
-                }
-                else
-                {
-                    var tensorrtOptions = new OrtTensorRTProviderOptions();
-
-                    tensorrtOptions.UpdateOptions(new Dictionary<string, string>
-                    {
-                        { "device_id", "0" },
-                        { "trt_fp16_enable", "1" },
-                        { "trt_engine_cache_enable", "1" },
-                        { "trt_engine_cache_path", "bin/models" }
-                    });
-
-                    FileManager.LogError(modelPath + " " + Path.ChangeExtension(modelPath, ".engine"));
-                    FileManager.LogError("loading model with tensort");
-
-                    sessionOptions.AppendExecutionProvider_Tensorrt(tensorrtOptions);
-                }
-
-                _onnxModel = new InferenceSession(modelPath, sessionOptions);
-                _outputNames = new List<string>(_onnxModel.OutputMetadata.Keys);
-
-                FileManager.LogError("successfully loaded model");
-
-                // Validate the onnx model output shape (ensure model is OnnxV8)
-                ValidateOnnxShape();
-            }
-            catch (OnnxRuntimeException ex)
-            {
-                FileManager.LogError($"ONNXRuntime had an error: {ex}");
-
-                string? message = null;
-                string? title = null;
-
-                // just in case
-                if (ex.Message.Contains("TensorRT execution provider is not enabled in this build") ||
-                    (ex.Message.Contains("LoadLibrary failed with error 126") && ex.Message.Contains("onnxruntime_providers_tensorrt.dll")))
-                {
-                    if (RequirementsManager.IsTensorRTInstalled())
-                    { // TensorRT should be preinstalled in all aimmy cuda versions, so this should be rare unless user has personally deleted the files.
-                        message = "TensorRT has been found by Aimmy, but not by ONNX. Please check your configuration.\nHint: Check CUDNN and your CUDA, and install dependencies to PATH correctly.";
-                        title = "Configuration Error";
-                    }
-                    else
-                    {
-                        message = "TensorRT execution provider has not been found on your build. Please check your configuration.\nHint: Download TensorRT 10.3.x and install the LIB folder to path.";
-                        title = "TensorRT Error";
-                    }
-                }
-                else if (ex.Message.Contains("CUDA execution provider is not enabled in this build") ||
-                         (ex.Message.Contains("LoadLibrary failed with error 126") && ex.Message.Contains("onnxruntime_providers_cuda.dll")))
-                {
-                    if (RequirementsManager.IsCUDAInstalled() && RequirementsManager.IsCUDNNInstalled())
-                    {
-                        message = "CUDA & CUDNN have been found by Aimmy, but not by ONNX. Please check your configuration.\nHint: Check CUDNN and your CUDA installations, path, etc. PATH directories should point directly towards the DLLS.";
-                        title = "Configuration Error";
-                    }
-                    else
-                    {
-                        message = "CUDA execution provider has not been found on your build. Please check your configuration.\nHint: Download CUDA 12.x. Then install CUDNN 9.x to your PATH (or install the DLL included aimmy)";
-                        title = "CUDA Error";
-                    }
-                }
-
-                if (message != null && title != null)
-                {
-                    MessageBox.Show(message, title, (MessageBoxButton)MessageBoxButtons.OK, (MessageBoxImage)MessageBoxIcon.Error);
-                }
-            }
-            catch (Exception ex)
-            {
-                FileManager.LogError($"Error starting the model: {ex}");
-                _onnxModel?.Dispose();
-            }
-
-            // Begin the loop
+            // load ai loop after model is loaded
             _isAiLoopRunning = true;
             _aiLoopThread = new Thread(AiLoop)
             {
@@ -304,24 +105,12 @@ namespace Aimmy2.AILogic
             };
             _aiLoopThread.Start();
 
-            return Task.CompletedTask;
-        }
 
-        private void ValidateOnnxShape()
-        {
-            var expectedShape = new int[] { 1, 5, NUM_DETECTIONS };
-            if (_onnxModel != null)
+            if (Dictionary.dropdownState["Screen Capture Method"] == "DirectX")
             {
-                var outputMetadata = _onnxModel.OutputMetadata;
-                if (!outputMetadata.Values.All(metadata => metadata.Dimensions.SequenceEqual(expectedShape)))
-                {
-                    FileManager.LogError($"Output shape does not match the expected shape of {string.Join("x", expectedShape)}.\n\nThis model will not work with Aimmy, please use an YOLOv8 model converted to ONNXv8.", true);
-                }
+                _captureManager.InitializeDirectX();
             }
         }
-
-        #endregion Models
-
         #region AI
 
         private static bool ShouldPredict() => Dictionary.toggleState["Show Detected Player"] || Dictionary.toggleState["Constant AI Tracking"] || InputBindingManager.IsHoldingBinding("Aim Keybind") || InputBindingManager.IsHoldingBinding("Second Aim Keybind");
@@ -421,7 +210,7 @@ namespace Aimmy2.AILogic
             }
         }
 
-        private async void UpdateFOV()
+        private static async void UpdateFOV()
         {
             if (Dictionary.dropdownState["Detection Area Type"] == "Closest to Mouse" && Dictionary.toggleState["FOV"])
             {
@@ -634,15 +423,7 @@ namespace Aimmy2.AILogic
         }
         #endregion
         #region Prediction (AI Work)
-        private Rectangle ClampRectangle(Rectangle rect, int screenWidth, int screenHeight)
-        {
-            int x = Math.Max(0, Math.Min(rect.X, screenWidth - rect.Width));
-            int y = Math.Max(0, Math.Min(rect.Y, screenHeight - rect.Height));
-            int width = Math.Min(rect.Width, screenWidth - x);
-            int height = Math.Min(rect.Height, screenHeight - y);
 
-            return new Rectangle(x, y, width, height);
-        }
         private async Task<Prediction?> GetClosestPrediction(bool useMousePosition = true)
         {
             var cursorPosition = WinAPICaller.GetCursorPosition();
@@ -652,19 +433,19 @@ namespace Aimmy2.AILogic
 
             Rectangle detectionBox = new(targetX - IMAGE_SIZE / 2, targetY - IMAGE_SIZE / 2, IMAGE_SIZE, IMAGE_SIZE);
 
-            detectionBox = ClampRectangle(detectionBox, ScreenWidth, ScreenHeight);
+            detectionBox = MathClass.ClampRectangle(detectionBox, ScreenWidth, ScreenHeight);
 
-            Bitmap? frame = ScreenGrab(detectionBox);
+            Bitmap? frame = _captureManager.ScreenGrab(detectionBox);
             if (frame == null) return null;
 
-            float[] inputArray = BitmapToFloatArray(frame);
+            float[] inputArray = MathClass.BitmapToFloatArray(frame);
             if (inputArray == null) return null;
 
             Tensor<float> inputTensor = new DenseTensor<float>(inputArray, new int[] { 1, 3, frame.Height, frame.Width });
             var inputs = new List<NamedOnnxValue> { NamedOnnxValue.CreateFromTensor("images", inputTensor) };
-            if (_onnxModel == null) return null;
+            if (_modelManager._onnxModel == null) return null;
 
-            using var results = _onnxModel.Run(inputs, _outputNames, _modeloptions);
+            using var results = _modelManager._onnxModel.Run(inputs, _modelManager._outputNames/*, _modeloptions*/);
             var outputTensor = results[0].AsTensor<float>();
 
             // Calculate the FOV boundaries
@@ -685,7 +466,7 @@ namespace Aimmy2.AILogic
                 return null;
             }
 
-            var tree = new KDTree<double, Prediction>(2, KDpoints.ToArray(), KDPredictions.ToArray(), L2Norm_Squared_Double);
+            var tree = new KDTree<double, Prediction>(2, KDpoints.ToArray(), KDPredictions.ToArray(), MathClass.L2Norm_Squared_Double);
             var nearest = tree.NearestNeighbors(new double[] { IMAGE_SIZE / 2.0, IMAGE_SIZE / 2.0 }, 1);
 
             if (nearest != null && nearest.Length > 0)
@@ -752,173 +533,7 @@ namespace Aimmy2.AILogic
         #endregion AI Loop Functions
 
         #region Screen Capture
-        public Bitmap? ScreenGrab(Rectangle detectionBox)
-        {
-            try
-            {
-                if (Dictionary.dropdownState["Screen Capture Method"] == "DirectX")
-                {
-                    Bitmap? frame = D3D11Screen(detectionBox);
-                    return frame;
-                }
-                else
-                {
-                    Bitmap? frame = GDIScreen(detectionBox);
-                    return frame;
-                }
-            }
-            catch (Exception e)
-            {
-                FileManager.LogError("Error capturing screen:" + e);
-                return null;
-            }
-        }
-        private Bitmap? D3D11Screen(Rectangle detectionBox)
-        {
-            try
-            {
-                if (_device == null || _context == null | _outputDuplication == null)
-                {
-                    FileManager.LogError("Device, context, or textures are null, attempting to reinitialize");
-                    ReinitializeD3D11();
 
-                    if (_device == null || _context == null || _outputDuplication == null)
-                    {
-                        throw new InvalidOperationException("Device, context, or textures are still null after reinitialization.");
-                    }
-                }
-
-                if (_captureBitmap != null)
-                {
-                    FileManager.LogInfo("Bitmap was not null, disposing.", true, 1500);
-                    _captureBitmap?.Dispose();
-                    _captureBitmap = null;
-                }
-
-                var result = _outputDuplication!.AcquireNextFrame(500, out var frameInfo, out var desktopResource);
-
-                if (result != Result.Ok)
-                {
-                    if (result == Vortice.DXGI.ResultCode.DeviceRemoved)
-                    {
-                        FileManager.LogError("Device removed, reinitializing D3D11.", true, 1000);
-                        ReinitializeD3D11();
-                        return null;
-                    }
-
-                    FileManager.LogError("Failed to acquire next frame: " + result + ". Reinitializing...");
-                    ReinitializeD3D11();
-                    return null;
-                }
-
-                using var screenTexture = desktopResource.QueryInterface<ID3D11Texture2D>();
-
-                bool requiresNewResources = _desktopImage == null || _desktopImage.Description.Width != detectionBox.Width || _desktopImage.Description.Height != detectionBox.Height;
-
-                if (requiresNewResources)
-                {
-                    _desktopImage?.Dispose();
-
-                    var desc = new Texture2DDescription
-                    {
-                        Width = detectionBox.Width,
-                        Height = detectionBox.Height,
-                        MipLevels = 1,
-                        ArraySize = 1,
-                        Format = screenTexture.Description.Format,
-                        SampleDescription = new SampleDescription(1, 0),
-                        Usage = ResourceUsage.Staging,
-                        CPUAccessFlags = CpuAccessFlags.Read,
-                        BindFlags = BindFlags.None
-                    };
-
-                    _desktopImage = _device.CreateTexture2D(desc);
-                }
-                var box = new Box
-                {
-                    Left = detectionBox.Left,
-                    Top = detectionBox.Top,
-                    Front = 0,
-                    Right = detectionBox.Right,
-                    Bottom = detectionBox.Bottom,
-                    Back = 1
-                };
-
-                _context!.CopySubresourceRegion(_desktopImage, 0, 0, 0, 0, screenTexture, 0, box);
-
-                if (_desktopImage == null) return null;
-                var map = _context.Map(_desktopImage, 0, MapMode.Read, Vortice.Direct3D11.MapFlags.None);
-
-                var bitmap = new Bitmap(detectionBox.Width, detectionBox.Height, PixelFormat.Format32bppArgb);
-                var boundsRect = new Rectangle(0, 0, bitmap.Width, bitmap.Height);
-                var mapDest = bitmap.LockBits(boundsRect, ImageLockMode.WriteOnly, bitmap.PixelFormat);
-
-                unsafe
-                {
-                    Buffer.MemoryCopy((void*)map.DataPointer, (void*)mapDest.Scan0, mapDest.Stride * mapDest.Height, map.RowPitch * detectionBox.Height);
-                    //    var sourcePtr = (byte*)map.DataPointer;
-                    //    var destPtr = (byte*)mapDest.Scan0;
-                    //    int rowPitch = map.RowPitch;
-                    //    int destStride = mapDest.Stride;
-                    //    int widthInBytes = detectionBox.Width * 4;
-
-                    //    Buffer.MemoryCopy(sourcePtr, destPtr, widthInBytes * detectionBox.Height, widthInBytes * detectionBox.Height);
-                }
-                bitmap.UnlockBits(mapDest);
-                _context.Unmap(_desktopImage, 0);
-                _outputDuplication.ReleaseFrame();
-
-                //FileManager.LogError($"Successfully captured screen with D3D11, width: {detectionBox.Width}, height: {detectionBox.Height}.");
-                return bitmap;
-            }
-
-            catch (SharpGenException ex)
-            {
-                FileManager.LogError("SharpGenException: " + ex);
-                ReinitializeD3D11();
-                return null;
-            }
-            catch (Exception e)
-            {
-                FileManager.LogError("Error capturing screen:" + e);
-                return null;
-            }
-        }
-        private Bitmap GDIScreen(Rectangle detectionBox)
-        {
-            if (detectionBox.Width <= 0 || detectionBox.Height <= 0)
-            {
-                throw new ArgumentException("Detection box dimensions must be greater than zero. (The enemy is too small)");
-            }
-
-            if (_device != null || _context != null || _outputDuplication != null)
-            {
-                FileManager.LogWarning("D3D11 was not properly disposed, disposing now...", true, 1500);
-                DisposeD311();
-            }
-
-            if (_captureBitmap == null || _captureBitmap.Width != detectionBox.Width || _captureBitmap.Height != detectionBox.Height)
-            {
-                _captureBitmap?.Dispose();
-                _captureBitmap = new Bitmap(detectionBox.Width, detectionBox.Height, PixelFormat.Format32bppArgb);
-            }
-
-            try
-            {
-                using (Graphics g = Graphics.FromImage(_captureBitmap))
-                {
-                    g.CopyFromScreen(detectionBox.Left, detectionBox.Top, 0, 0, detectionBox.Size);
-                }
-            }
-            catch (Exception ex)
-            {
-                FileManager.LogError($"Failed to capture screen: {ex.Message}");
-                throw;
-            }
-
-            //FileManager.LogError($"Successfully captured screen with GDI, width: {detectionBox.Width}, height: {detectionBox.Height}.");
-            return _captureBitmap;
-        }
 
         private void SaveFrame(Bitmap frame, Prediction? DoLabel = null)
         {
@@ -943,79 +558,8 @@ namespace Aimmy2.AILogic
                 File.WriteAllText(labelPath, $"0 {x} {y} {width} {height}");
             }
         }
-        #region Reinitialization, Clamping, Misc
-        public void ReinitializeD3D11()
-        {
-            try
-            {
-                DisposeD311();
-                InitializeDirectX();
-                FileManager.LogError("Reinitializing D3D11, timing out for 1000ms");
-                Thread.Sleep(1000);
-            }
-            catch (Exception ex)
-            {
-                FileManager.LogError("Error during D3D11 reinitialization: " + ex);
-            }
-        }
-        #endregion
         #endregion Screen Capture
 
-        #region complicated math
-
-        public static Func<double[], double[], double> L2Norm_Squared_Double = (x, y) =>
-        {
-            double dist = 0f;
-            for (int i = 0; i < x.Length; i++)
-            {
-                dist += (x[i] - y[i]) * (x[i] - y[i]);
-            }
-
-            return dist;
-        };
-
-        public static float[] BitmapToFloatArray(Bitmap image)
-        {
-            int height = image.Height;
-            int width = image.Width;
-            float[] result = new float[3 * height * width];
-            float multiplier = 1.0f / 255.0f;
-
-            Rectangle rect = new(0, 0, width, height);
-            BitmapData bmpData = image.LockBits(rect, ImageLockMode.ReadOnly, PixelFormat.Format24bppRgb);
-
-            int stride = bmpData.Stride;
-            int offset = stride - width * 3;
-
-            try
-            {
-                unsafe
-                {
-                    byte* ptr = (byte*)bmpData.Scan0.ToPointer();
-                    int baseIndex = 0;
-                    for (int i = 0; i < height; i++)
-                    {
-                        for (int x = 0; x < width; x++)
-                        {
-                            result[baseIndex] = ptr[2] * multiplier; // R
-                            result[height * width + baseIndex] = ptr[1] * multiplier; // G
-                            result[2 * height * width + baseIndex] = ptr[0] * multiplier; // B
-                            ptr += 3;
-                            baseIndex++;
-                        }
-                        ptr += offset;
-                    }
-                }
-            }
-            finally
-            {
-                image.UnlockBits(bmpData);
-            }
-
-            return result;
-        }
-
-        #endregion complicated math
         public void Dispose()
         {
             // Stop the loop
@@ -1030,46 +574,20 @@ namespace Aimmy2.AILogic
 
             DisposeResources();
         }
-        private void DisposeD311()
-        {
-            if (_desktopImage != null)
-            {
-                _desktopImage?.Dispose();
-                _desktopImage = null;
-            }
 
-            if (_outputDuplication != null)
-            {
-                _outputDuplication?.Dispose();
-                _outputDuplication = null;
-            }
-
-            if (_context != null)
-            {
-                _context?.Dispose();
-                _context = null;
-            }
-
-            if (_device != null)
-            {
-                _device?.Dispose();
-                _device = null;
-            }
-
-        }
         private void DisposeResources()
         {
             if (Dictionary.dropdownState["Screen Capture Method"] == "DirectX")
             {
-                DisposeD311();
+                _captureManager.DisposeD3D11();
             }
             else
             {
-                _captureBitmap?.Dispose();
+                _captureManager._captureBitmap?.Dispose();
             }
 
-            _onnxModel?.Dispose();
-            _modeloptions?.Dispose();
+            _modelManager._onnxModel?.Dispose();
+            _modelManager._modeloptions?.Dispose();
         }
 
         public class Prediction
