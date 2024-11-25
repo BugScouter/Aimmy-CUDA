@@ -1,18 +1,12 @@
 ﻿using Aimmy2.Other;
 using SharpGen.Runtime;
-using System;
-using System.Collections.Generic;
 using System.Drawing.Imaging;
 using System.Drawing;
-using System.Linq;
-using System.Text;
-using System.Threading.Tasks;
 using Vortice.Direct3D;
 using Vortice.Direct3D11;
 using Vortice.DXGI;
 using Vortice.Mathematics;
 using Aimmy2.Class;
-using static Aimmy2.AILogic.AIManager;
 
 namespace Aimmy2.AILogic
 {

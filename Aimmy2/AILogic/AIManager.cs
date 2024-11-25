@@ -5,21 +5,13 @@ using Aimmy2.WinformsReplacement;
 using Microsoft.ML.OnnxRuntime;
 using Microsoft.ML.OnnxRuntime.Tensors;
 using Microsoft.Win32;
-using SharpGen.Runtime;
 using Supercluster.KDTree;
 using System.Diagnostics;
 using System.Drawing;
-using System.Drawing.Imaging;
 using System.IO;
 using System.Windows;
-using System.Windows.Forms;
 using Visuality;
-using Vortice.Direct3D;
-using Vortice.Direct3D11;
-using Vortice.DXGI;
-using Vortice.Mathematics;
 using Application = System.Windows.Application;
-using MessageBox = System.Windows.MessageBox;
 
 namespace Aimmy2.AILogic
 {
