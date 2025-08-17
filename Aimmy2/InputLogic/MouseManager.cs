@@ -260,12 +260,7 @@ namespace InputLogic
             previousX = newPosition.X;
             previousY = newPosition.Y;
 
-            if (Dictionary.toggleState["Auto Trigger"] &&
-                !Dictionary.toggleState["Spray Mode"])
-            {
-                Task.Run(() => DoTriggerClick());
-            }
-            else if (!Dictionary.toggleState["Auto Trigger"])
+            if (!Dictionary.toggleState["Auto Trigger"])
             {
                 ResetSprayState();
             }

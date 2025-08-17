@@ -369,6 +369,11 @@ namespace Aimmy2.Controls
             // Handle ColorWheel separately as it's a custom control
             uiManager.ThemeColorWheel = new AColorWheel();
 
+            //--
+            var arrowButton = uiManager.ThemeColorWheel.FindName("ArrowButton") as Button;
+            arrowButton.Visibility = Visibility.Visible;
+            //--
+
             // Insert before separator
             var insertIndex = ThemeMenu.Children.Count - 2;
             ThemeMenu.Children.Insert(insertIndex, uiManager.ThemeColorWheel);

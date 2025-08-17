@@ -64,6 +64,9 @@ namespace Visuality
                     cleanupTimer.Start();
                 }
 
+                //Now i am not sure if the media will overwrite the notice bar, but just incase, subscribe to the exclusion!
+                ThemeManager.ExcludeWindowFromBackground(this);
+
                 // Register with ThemeManager
                 ThemeManager.RegisterElement(this);
                 ThemeManager.ThemeChanged += OnThemeChanged;

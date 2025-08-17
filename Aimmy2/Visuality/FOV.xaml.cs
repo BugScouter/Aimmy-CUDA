@@ -1,4 +1,5 @@
 ﻿using Aimmy2.Class;
+using Aimmy2.Theme;
 using Aimmy2.UILibrary;
 using Class;
 using System.Runtime.InteropServices;
@@ -26,6 +27,9 @@ namespace Visuality
 
             // Subscribe to display changes early
             DisplayManager.DisplayChanged += OnDisplayChanged;
+
+            //Subscribe to Exclusion (I love thick latinas btw)
+            ThemeManager.ExcludeWindowFromBackground(this);
 
             // Subscribe to property changes
             PropertyChanger.ReceiveColor = UpdateFOVColor;

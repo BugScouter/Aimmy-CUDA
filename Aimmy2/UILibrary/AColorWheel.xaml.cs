@@ -1,12 +1,17 @@
 ﻿using Aimmy2.Theme;
 using Newtonsoft.Json.Linq;
 using System.Globalization;
+using System.IO;
 using System.Text.RegularExpressions;
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Input;
 using System.Windows.Media;
+using System.Windows.Media.Animation;
 using System.Windows.Media.Imaging;
+using System.Windows.Threading;
+using Visuality;
+using static System.Windows.Forms.VisualStyles.VisualStyleElement.ScrollBar;
 
 namespace Aimmy2.UILibrary
 {
@@ -15,6 +20,19 @@ namespace Aimmy2.UILibrary
         public static readonly DependencyProperty TitleProperty =
         DependencyProperty.Register("Title", typeof(string), typeof(AColorWheel),
             new PropertyMetadata("Theme Color", OnTitleChanged));
+
+        public static readonly DependencyProperty ShowArrowProperty =
+        DependencyProperty.Register(
+        "ShowArrow",
+        typeof(bool),
+        typeof(AColorWheel),
+        new PropertyMetadata(false));
+
+        public bool ShowArrow
+        {
+            get => (bool)GetValue(ShowArrowProperty);
+            set => SetValue(ShowArrowProperty, value);
+        }
 
         public string Title
         {
@@ -32,6 +50,10 @@ namespace Aimmy2.UILibrary
         //--
         private Color _initialColor;
         public bool SuppressThemeApply { get; set; } = false;
+        private bool _isShowingDragDrop = false;
+        private readonly TimeSpan _animationDuration = TimeSpan.FromMilliseconds(200);
+        private double _mediaBrightness = 1.0;
+        private bool _isUpdatingMediaFromCode = false;
         //--
         private bool _isMouseDown = false;
         private WriteableBitmap _colorWheelBitmap;
@@ -446,6 +468,391 @@ namespace Aimmy2.UILibrary
             _initialColor = color;
         }
         //--
-    }
 
+        #region Drag & Drop & Image Support, etc.
+
+        private void DragDropView_DragEnter(object sender, DragEventArgs e)
+        {
+            if (IsValidDragData(e.Data))
+            {
+                DropZone.Background = new SolidColorBrush((Color)ColorConverter.ConvertFromString("#3FFFFFFF"));
+                e.Effects = DragDropEffects.Copy;
+            }
+            else
+            {
+                e.Effects = DragDropEffects.None;
+            }
+            e.Handled = true;
+        }
+
+        private void DragDropView_DragLeave(object sender, DragEventArgs e)
+        {
+            DropZone.Background = new SolidColorBrush((Color)ColorConverter.ConvertFromString("#1AFFFFFF"));
+            e.Handled = true;
+        }
+
+        private void DragDropView_Drop(object sender, DragEventArgs e)
+        {
+            DropZone.Background = new SolidColorBrush((Color)ColorConverter.ConvertFromString("#1AFFFFFF"));
+
+            if (e.Data.GetDataPresent(DataFormats.FileDrop))
+            {
+                var files = (string[])e.Data.GetData(DataFormats.FileDrop);
+                if (files?.Length > 0)
+                {
+                    string filePath = files[0];
+                    string extension = System.IO.Path.GetExtension(filePath)?.ToLowerInvariant();
+
+                    // Only allow image formats
+                    if (extension == ".png" || extension == ".jpg" || extension == ".jpeg")
+                    {
+                        LoadMediaPreview(filePath);
+                    }
+                    else
+                    {
+                        new NoticeBar("Error: Only PNG/JPG/JPEG images are supported", 3000).Show();
+                    }
+
+                    e.Handled = true;
+                    return;
+                }
+            }
+
+            e.Handled = true;
+        }
+
+        private bool IsValidDragData(IDataObject data)
+        {
+            return data.GetDataPresent(DataFormats.FileDrop)
+                   && ((string[])data.GetData(DataFormats.FileDrop))[0].ToLower()
+                   is var file
+                   && (file.EndsWith(".png")
+                      || file.EndsWith(".jpg")
+                      || file.EndsWith(".jpeg"));
+
+        }
+
+        private void LoadMediaPreview(string filePath)
+        {
+            if (DropHintText == null || MediaPreviewImage == null || MediaPreviewPlayer == null)
+                return;
+            try
+            {
+                DropZone.Background = new SolidColorBrush(Color.FromArgb(90, 0, 0, 0));
+                DropHintText.Visibility = Visibility.Collapsed;
+                string mediaDir = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "bin", "media");
+                Directory.CreateDirectory(mediaDir);
+                string fileName = Path.GetFileName(filePath);
+                string destPath = Path.Combine(mediaDir, fileName);
+                if (!filePath.Equals(destPath, StringComparison.OrdinalIgnoreCase))
+                {
+                    if (File.Exists(destPath)) File.Delete(destPath);
+                    File.Copy(filePath, destPath);
+                }
+                if (filePath.ToLower().EndsWith(".png") ||
+                    filePath.ToLower().EndsWith(".jpg") ||
+                    filePath.ToLower().EndsWith(".jpeg"))
+                {
+                    MediaPreviewImage.Visibility = Visibility.Visible;
+                    var bitmap = new BitmapImage();
+                    bitmap.BeginInit();
+                    bitmap.UriSource = new Uri(destPath);
+                    bitmap.CacheOption = BitmapCacheOption.OnLoad;
+                    bitmap.EndInit();
+                    MediaPreviewImage.Source = bitmap;
+                    MediaPreviewImage.Stretch = Stretch.Uniform;
+
+                }
+                _mediaBrightness = ThemeManager.MediaBrightness;
+                InitializeMediaBrightnessControls();
+                ThemeManager.SetMediaBackground(destPath, _mediaBrightness);
+            }
+            catch
+            {
+                DropHintText.Visibility = Visibility.Visible;
+                DropHintText.Text = "Invalid Media File";
+                DropZone.Background = Brushes.Transparent;
+            }
+        }
+
+        private void InitializeMediaBrightnessControls()
+        {
+            _isUpdatingMediaFromCode = true;
+            _mediaBrightness = ThemeManager.MediaBrightness;
+            if (BrightnessMediaSlider != null)
+            {
+                BrightnessMediaSlider.Value = _mediaBrightness;
+            }
+            if (BrightnessMediaValue != null)
+            {
+                BrightnessMediaValue.Text = (_mediaBrightness * 100).ToString("F0");
+            }
+            _isUpdatingMediaFromCode = false;
+        }
+
+        public void SyncWithThemeManager()
+        {
+            if (ThemeManager.IsMediaBackground)
+            {
+                _isUpdatingMediaFromCode = true;
+                _mediaBrightness = ThemeManager.MediaBrightness;
+                if (BrightnessMediaSlider != null)
+                {
+                    BrightnessMediaSlider.Value = _mediaBrightness;
+                }
+                if (BrightnessMediaValue != null)
+                {
+                    BrightnessMediaValue.Text = (_mediaBrightness * 100).ToString("F0");
+                }
+                _isUpdatingMediaFromCode = false;
+                ApplyMediaBrightness();
+            }
+        }
+
+        public void ClearMediaPreview()
+        {
+            if (MediaPreviewImage.Parent is Grid imageParent)
+            {
+                var overlays = imageParent.Children.OfType<Border>()
+                    .Where(b => b.Tag?.ToString() == "BrightnessOverlay")
+                    .ToList();
+                foreach (var overlay in overlays)
+                    imageParent.Children.Remove(overlay);
+            }
+            MediaPreviewImage.Source = null;
+            MediaPreviewImage.OpacityMask = null;
+            MediaPreviewImage.Visibility = Visibility.Collapsed;
+            DropHintText.Visibility = Visibility.Visible;
+            DropZone.Background = Brushes.Transparent;
+            ThemeManager.ClearMediaBackground();
+            _mediaBrightness = 1.0;
+            InitializeMediaBrightnessControls();
+        }
+
+        #endregion
+
+        #region XAML Buttons - Media
+
+        private void ArrowButton_Click(object sender, RoutedEventArgs e)
+        {
+            _isShowingDragDrop = !_isShowingDragDrop;
+            ArrowButton.Content = _isShowingDragDrop ? "<" : ">";
+            if (_isShowingDragDrop)
+            {
+                DragDropView.Visibility = Visibility.Visible;
+                DragDropView.Opacity = 0;
+                DragDropView.IsHitTestVisible = true;
+                ColorWheelView.BeginAnimation(OpacityProperty,
+                    new DoubleAnimation(0, _animationDuration));
+                DragDropView.BeginAnimation(OpacityProperty,
+                    new DoubleAnimation(1, _animationDuration));
+                var timer = new DispatcherTimer { Interval = _animationDuration };
+                timer.Tick += (s, args) =>
+                {
+                    ColorWheelView.Visibility = Visibility.Collapsed;
+                    ColorWheelView.IsHitTestVisible = false;
+                    timer.Stop();
+                };
+                timer.Start();
+            }
+            else
+            {
+                ColorWheelView.Visibility = Visibility.Visible;
+                ColorWheelView.Opacity = 0;
+                ColorWheelView.IsHitTestVisible = true;
+                DragDropView.BeginAnimation(OpacityProperty,
+                new DoubleAnimation(0, _animationDuration));
+                ColorWheelView.BeginAnimation(OpacityProperty,
+                new DoubleAnimation(1, _animationDuration));
+                var timer = new DispatcherTimer { Interval = _animationDuration };
+                timer.Tick += (s, args) =>
+                {
+                    DragDropView.Visibility = Visibility.Collapsed;
+                    DragDropView.IsHitTestVisible = false;
+                    timer.Stop();
+                };
+                timer.Start();
+            }
+        }
+
+        private void BrightnessMediaSlider_ValueChanged(object sender, RoutedPropertyChangedEventArgs<double> e)
+        {
+            if (BrightnessMediaSlider == null || _isUpdatingMediaFromCode)
+                return;
+            _mediaBrightness = BrightnessMediaSlider.Value;
+            if (BrightnessMediaValue != null)
+            {
+                _isUpdatingMediaFromCode = true;
+                BrightnessMediaValue.Text = Math.Round(_mediaBrightness * 100).ToString("F0");
+                _isUpdatingMediaFromCode = false;
+            }
+            ApplyMediaBrightness();
+            ThemeManager.UpdateMediaBrightness(_mediaBrightness);
+        }
+
+        private void BrightnessMediaSlider_DragCompleted(object sender, System.Windows.Controls.Primitives.DragCompletedEventArgs e)
+        {
+            if (BrightnessMediaValue != null)
+            {
+                BrightnessMediaValue.Text = (_mediaBrightness * 100).ToString("F0");
+            }
+            ThemeManager.UpdateMediaBrightness(_mediaBrightness);
+        }
+
+        private void BrightnessMediaValue_TextChanged(object sender, TextChangedEventArgs e)
+        {
+            if (System.Text.RegularExpressions.Regex.IsMatch(BrightnessMediaValue.Text, "[^0-9]") ||
+                (BrightnessMediaValue.Text.Length > 2 && BrightnessMediaValue.Text != "100"))
+            {
+                BrightnessMediaValue.Text = BrightnessMediaValue.Text.Remove(BrightnessMediaValue.Text.Length - 1);
+            }
+            if (BrightnessMediaValue.Text.Length < 1)
+            {
+                BrightnessMediaValue.Text = "0";
+            }
+        }
+
+        private void BrightnessMediaValue_KeyDown(object sender, KeyEventArgs e)
+        {
+            if (e.Key == Key.Return)
+            {
+                try
+                {
+                    double value = Convert.ToDouble(BrightnessMediaValue.Text) / 100.0;
+                    value = Math.Max(0, Math.Min(2, value));
+
+                    _isUpdatingMediaFromCode = true;
+                    BrightnessMediaSlider.Value = value;
+                    _isUpdatingMediaFromCode = false;
+
+                    _mediaBrightness = value;
+                    ApplyMediaBrightness();
+                    ThemeManager.UpdateMediaBrightness(_mediaBrightness);
+                }
+                catch
+                {
+                    BrightnessMediaValue.Text = (_mediaBrightness * 100).ToString("F0");
+                }
+                e.Handled = true;
+            }
+        }
+
+        private void Clear_Click(object sender, RoutedEventArgs e)
+        {
+            try
+            {
+                if (MediaPreviewImage != null)
+                {
+                    MediaPreviewImage.Source = null;
+                    MediaPreviewImage.Visibility = Visibility.Collapsed;
+                }
+
+                if (MediaPreviewPlayer != null)
+                {
+                    MediaPreviewPlayer.Source = null;
+                    MediaPreviewPlayer.Stop();
+                    MediaPreviewPlayer.Visibility = Visibility.Collapsed;
+                }
+                if (DropHintText != null)
+                {
+                    DropHintText.Visibility = Visibility.Visible;
+                    DropHintText.Text = "Drag & Drop Media Here";
+                }
+                _mediaBrightness = 1.0;
+                if (BrightnessMediaSlider != null) BrightnessMediaSlider.Value = 1.0;
+                if (BrightnessMediaValue != null) BrightnessMediaValue.Text = "100";
+                ThemeManager.ClearMediaBackground();
+            }
+            catch (Exception ex)
+            {
+                MessageBox.Show($"Error clearing media: {ex.Message}");
+            }
+        }
+
+        #endregion
+
+        #region Media Brightness Logic - KMP
+
+        private void ApplyMediaBrightness()
+        {
+            if (MediaPreviewImage.Visibility == Visibility.Visible && MediaPreviewImage.Source != null)
+            {
+                ApplyImageBrightness();
+            }
+
+        }
+
+        private void ApplyImageBrightness()
+        {
+            var brightnessEffect = new System.Windows.Media.Effects.DropShadowEffect
+            {
+                Color = Colors.White,
+                Direction = 0,
+                ShadowDepth = 0,
+                BlurRadius = 0,
+                Opacity = 0
+            };
+            var scaleTransform = new ScaleTransform();
+            var rotateTransform = new RotateTransform();
+            var transformGroup = new TransformGroup();
+            if (_mediaBrightness < 1.0)
+            {
+                MediaPreviewImage.OpacityMask = new SolidColorBrush(Color.FromArgb(
+                    (byte)(255 * _mediaBrightness), 255, 255, 255));
+            }
+            else
+            {
+                MediaPreviewImage.OpacityMask = null;
+                if (MediaPreviewImage.Parent is Grid parentGrid)
+                {
+                    var existingOverlay = parentGrid.Children.OfType<Border>()
+                        .FirstOrDefault(b => b.Tag?.ToString() == "BrightnessOverlay");
+                    if (existingOverlay != null)
+                        parentGrid.Children.Remove(existingOverlay);
+
+                    if (_mediaBrightness > 1.0)
+                    {
+                        var overlay = new Border
+                        {
+                            Tag = "BrightnessOverlay",
+                            Background = new SolidColorBrush(Color.FromArgb(
+                                (byte)(255 * (_mediaBrightness - 1.0) * 0.3), 255, 255, 255)),
+                            IsHitTestVisible = false
+                        };
+
+                        Grid.SetRow(overlay, Grid.GetRow(MediaPreviewImage));
+                        Grid.SetColumn(overlay, Grid.GetColumn(MediaPreviewImage));
+                        parentGrid.Children.Add(overlay);
+                    }
+                }
+            }
+        }
+
+        public void SyncBrightnessWithThemeManager()
+        {
+            if (ThemeManager.IsMediaBackground)
+            {
+                _mediaBrightness = ThemeManager.MediaBrightness;
+
+                _isUpdatingMediaFromCode = true;
+
+                if (BrightnessMediaSlider != null)
+                {
+                    BrightnessMediaSlider.Value = _mediaBrightness;
+                }
+
+                if (BrightnessMediaValue != null)
+                {
+                    BrightnessMediaValue.Text = (_mediaBrightness * 100).ToString("F0");
+                }
+
+                _isUpdatingMediaFromCode = false;
+
+                ApplyMediaBrightness();
+            }
+        }
+
+        #endregion
+
+    }
 }

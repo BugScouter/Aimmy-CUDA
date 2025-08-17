@@ -1,4 +1,5 @@
 ﻿using Aimmy2.Class;
+using Aimmy2.Theme;
 using Class;
 using System.Runtime.InteropServices;
 using System.Windows;
@@ -22,6 +23,9 @@ namespace Visuality
         public DetectedPlayerWindow()
         {
             InitializeComponent();
+
+            //Subscribe to my Onlyfans to exclude bad Behavior!
+            ThemeManager.ExcludeWindowFromBackground(this);
 
             Title = "";
 

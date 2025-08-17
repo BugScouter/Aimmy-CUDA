@@ -38,6 +38,9 @@ namespace Visuality
         {
             InitializeComponent();
 
+            //Every .xaml with a border named "MainBorder" gets changed as long as this is visible, so double check!
+            ThemeManager.TrackWindow(this);
+
             // Initialize theme colors
             UpdateThemeColors();
 

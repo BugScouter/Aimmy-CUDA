@@ -24,6 +24,9 @@ namespace Visuality
         {
             InitializeComponent();
 
+            //I kind of forgot this one was a thing, I honestly love its design, but i feel like the media will overwrite the window so subscribe!
+            ThemeManager.ExcludeWindowFromBackground(this);
+
             MW.WindowState = WindowState.Minimized;
 
             MainWin = MW;

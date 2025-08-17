@@ -25,6 +25,10 @@ namespace UISections
             ColorWheelControl.Title = ColorPickerTitle;
             ColorWheelControl.SuppressThemeApply = true;
             //--
+
+            //Every .xaml with a border named "MainBorder" gets changed as long as this is visible, so double check! - Yes i copied and pasted this comment, i couldn't find anything better to say, ugh.
+            ThemeManager.TrackWindow(this);
+
             ThemeManager.RegisterElement(this);
             ThemeManager.RegisterElement(ColorWheelControl);
             ColorWheelControl.SuppressThemeApply = true;
