@@ -2,6 +2,7 @@
 using Aimmy2.Class;
 using Aimmy2.Other;
 using Class;
+using System.Collections.ObjectModel;
 using System.IO;
 using System.Windows;
 using System.Windows.Controls;
@@ -89,32 +90,54 @@ namespace Other
             if (Dictionary.lastLoadedModel == selectedModel || CurrentlyLoadingModel) return;
 
             CurrentlyLoadingModel = true;
+            ModelListBox.IsEnabled = false;
+
             Dictionary.lastLoadedModel = selectedModel;
 
+            LogManager.Log(LogManager.LogLevel.Info, "Store values");
             // Store original values and disable them temporarily
             var toggleKeys = new[] { "Aim Assist", "Constant AI Tracking", "Auto Trigger", "Show Detected Player", "Show AI Confidence", "Show Tracers" };
             var originalToggleStates = toggleKeys.ToDictionary(key => key, key => Dictionary.toggleState[key]);
-            foreach (var key in toggleKeys)
+            try
             {
-                Dictionary.toggleState[key] = false;
+                foreach (var key in toggleKeys)
+                {
+                    Dictionary.toggleState[key] = false;
+                }
+
+                // Let the AI finish up
+                await Task.Delay(150);
+                LogManager.Log(LogManager.LogLevel.Info, "150ms delay");
+
+                // Reload AIManager with new model
+                AIManager?.Dispose();
+                AIManager = new AIManager(modelPath);
+                bool isTensorRT = Dictionary.dropdownState["Execution Provider"] == "TensorRT";
+                if (isTensorRT)
+                {
+                        while (CurrentlyLoadingModel)
+                        {
+                        await Task.Delay(50); 
+                        }
+                }
+
+                string content = "Loaded Model: " + selectedModel;
+                ModelListBox.IsEnabled = true;
+                SelectedModelNotifier.Content = content;
+                LogManager.Log(LogManager.LogLevel.Info, content, true, 2000);
             }
-
-            // Let the AI finish up
-            await Task.Delay(150);
-
-            // Reload AIManager with new model
-            AIManager?.Dispose();
-            AIManager = new AIManager(modelPath);
-
-            // Restore original values
-            foreach (var keyValuePair in originalToggleStates)
+            catch (Exception ex)
             {
-                Dictionary.toggleState[keyValuePair.Key] = keyValuePair.Value;
+                LogManager.Log(LogManager.LogLevel.Error, $"Model load failed: {ex.Message}", true, 2000);
+                Dictionary.lastLoadedModel = null; // Reset to allow retries
             }
+            finally
+            {
+                // Restore toggle states
+                foreach (var kv in originalToggleStates)
+                    Dictionary.toggleState[kv.Key] = kv.Value;
 
-            string content = "Loaded Model: " + selectedModel;
-            SelectedModelNotifier.Content = content;
-            LogManager.Log(LogManager.LogLevel.Info, content, true, 2000);
+            }
         }
 
         private void ConfigListBox_SelectionChanged(object sender, SelectionChangedEventArgs e)
@@ -301,6 +324,16 @@ namespace Other
             {
                 throw new Exception(ex.ToString());
             }
+        }
+
+        private async Task WaitForTensorRTLoad()
+        {
+            // Simulate a load-checking loop
+            await Task.Run(async () =>
+            {
+                while (CurrentlyLoadingModel)
+                    await Task.Delay(50).ConfigureAwait(false);
+            });
         }
     }
 }

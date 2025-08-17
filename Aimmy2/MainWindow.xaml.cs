@@ -86,6 +86,8 @@ namespace Aimmy2
             try
             {
                 SaveDictionary.EnsureDirectoriesExist();
+                
+                RequirementsManager.CheckForRequirements();
 
                 InitializeMenus();
                 InitializeFileManagerEarly();
@@ -447,7 +449,7 @@ namespace Aimmy2
 
             SaveDictionary.WriteJSON(Dictionary.sliderSettings
                 .Concat(Dictionary.dropdownState)
-                .Where(kvp => kvp.Key != "Screen Capture Method")
+                //.Where(kvp => kvp.Key != "Screen Capture Method") ? - taylor
                 .GroupBy(kvp => kvp.Key)
                 .ToDictionary(g => g.Key, g => g
                 .First().Value));
@@ -927,7 +929,22 @@ namespace Aimmy2
                 {
                     ["DirectX"] = 0,
                     ["GDI+"] = 1
-                })
+                }),
+                (uiManager.D_ExecutionProvider, "Execution Provider", new Dictionary<string, int>
+                {
+                    ["CUDA"] = 0,
+                    ["TensorRT"] = 1,
+                    ["CPU"] = 2
+                }),
+                (uiManager.D_ImageSize, "Image Size", new Dictionary<string, int>
+                {
+                    ["640"] = 0,
+                    ["512"] = 1,
+                    ["416"] = 2,
+                    ["320"] = 3,
+                    ["256"] = 4,
+                    ["160"] = 5
+                }),
             };
 
             foreach (var (dropdown, key, mappings) in dropdownConfigs)

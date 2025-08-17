@@ -102,6 +102,7 @@ namespace Aimmy2.Class
             { "Aiming Boundaries Alignment", "Center" },
             { "Mouse Movement Method", "Mouse Event" },
             { "Screen Capture Method", "DirectX" },
+            { "Execution Provider", "CUDA" },
             { "Tracer Position", "Bottom" },
             { "Movement Path", "Cubic Bezier" },
             { "Image Size", "640" },

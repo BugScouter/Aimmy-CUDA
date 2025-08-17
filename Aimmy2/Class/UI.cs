@@ -8,9 +8,7 @@ namespace Class
     {
         // Aim Menu
         public ATitle? AT_Aim { get; set; }
-
         public AToggle? T_AimAligner { get; set; }
-
         public AKeyChanger? C_Keybind { get; set; }
         public AToggle? T_ConstantAITracking { get; set; }
         public AToggle? T_StickyAim { get; set; }
@@ -107,10 +105,14 @@ namespace Class
         public AToggle? T_AutoLabelData { get; set; }
         public ADropdown? D_MouseMovementMethod { get; set; }
         public ADropdown? D_ScreenCaptureMethod { get; set; }
+        public ADropdown? D_ExecutionProvider { get; set; }
         public ADropdown? D_ImageSize { get; set; }
         public ComboBoxItem? DDI_LGHUB { get; set; }
         public ComboBoxItem? DDI_RazerSynapse { get; set; }
         public ComboBoxItem? DDI_ddxoft { get; set; }
+        public ComboBoxItem? DDI_CUDA { get; set; }
+        public ComboBoxItem? DDI_TensorRT { get; set; }
+        public ComboBoxItem? DDI_CPU { get; set; }
         public AToggle? T_DebugMode { get; set; }
         public ASlider? S_AIMinimumConfidence { get; set; }
         public AToggle? T_MouseBackgroundEffect { get; set; }

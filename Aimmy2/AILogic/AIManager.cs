@@ -56,14 +56,14 @@ namespace Aimmy2.AILogic
         private KalmanPrediction kalmanPrediction;
         private WiseTheFoxPrediction wtfpredictionManager;
 
-        //private Bitmap? _screenCaptureBitmap;
-        private byte[]? _bitmapBuffer; // Reusable buffer for bitmap operations
+        private SessionOptions sessionOptions = new()
+        {
+            EnableCpuMemArena = true,
+            EnableMemoryPattern = false,
+            GraphOptimizationLevel = GraphOptimizationLevel.ORT_ENABLE_ALL,
+            ExecutionMode = ExecutionMode.ORT_PARALLEL
 
-        // Screen capture
-        //private Device _dxDevice;
-        //private OutputDuplication _deskDuplication;
-        //private Texture2DDescription _texDesc;
-        //private Texture2D _stagingTex;
+        };
 
         // Display-aware properties
         private int ScreenWidth => DisplayManager.ScreenWidth;
@@ -84,7 +84,7 @@ namespace Aimmy2.AILogic
         private Prediction _currentTarget = null;
         private int _consecutiveFramesWithoutTarget = 0;
         private const int MAX_FRAMES_WITHOUT_TARGET = 3; // Allow 3 frames of target loss
-                                                         //private const float TARGET_MATCH_THRESHOLD = 50f; (now is a slider, Dictionary.sliderSettings["Sticky Aim Threshold"])
+        //private const float TARGET_MATCH_THRESHOLD = 50f; (now is a slider, Dictionary.sliderSettings["Sticky Aim Threshold"])
 
         private double CenterXTranslated = 0;
         private double CenterYTranslated = 0;
@@ -189,7 +189,7 @@ namespace Aimmy2.AILogic
                     lines.Add($"{kvp.Key}: Avg={data.AverageTime:F2}ms, Min={data.MinTime}ms, Max={data.MaxTime}ms, Count={data.CallCount}");
                 }
 
-                lines.Add($"Overall FPS: {(iterationCount > 0 ? 1000.0 / (totalTime / (double)iterationCount) : 0):F2}");
+                lines.Add($"Overall FPS: {(1000.0 / ((double)totalTime / iterationCount)):F2}");
 
                 //File.WriteAllLines("AIManager_Benchmarks.txt", lines);
 
@@ -215,29 +215,20 @@ namespace Aimmy2.AILogic
 
             _modeloptions = new RunOptions();
 
-            var sessionOptions = new SessionOptions
-            {
-                EnableCpuMemArena = true,
-                EnableMemoryPattern = false,
-                GraphOptimizationLevel = GraphOptimizationLevel.ORT_ENABLE_ALL,
-                ExecutionMode = ExecutionMode.ORT_PARALLEL,
-                InterOpNumThreads = Environment.ProcessorCount,
-                IntraOpNumThreads = Environment.ProcessorCount
-            };
 
-            // Attempt to load via DirectML (else fallback to CPU)
-            Task.Run(() => InitializeModel(sessionOptions, modelPath));
+            // Attempt to load via CUDA (else fallback to CPU)
+            Task.Run(() => InitializeModel(modelPath));
         }
 
         #region Models
 
-        private async Task InitializeModel(SessionOptions sessionOptions, string modelPath)
+        private async Task InitializeModel(string modelPath)
         {
             using (Benchmark("ModelInitialization"))
             {
                 try
                 {
-                    await LoadModelAsync(sessionOptions, modelPath, useDirectML: true);
+                    await LoadModelAsync(modelPath);
                 }
                 catch (Exception ex)
                 {
@@ -245,53 +236,143 @@ namespace Aimmy2.AILogic
 
                     try
                     {
-                        await LoadModelAsync(sessionOptions, modelPath, useDirectML: false);
+                        await LoadModelAsync(modelPath, failure: true);
                     }
                     catch (Exception e)
                     {
-                        LogManager.Log(LogLevel.Error, $"Error starting the model via CPU: {e.Message}, you won't be able to aim assist at all.", true);
+                        LogManager.Log(LogLevel.Error, $"Error starting the model via CPU: {e.Message}, you won't be able to use aim assist at all.", true);
                     }
                 }
+                finally
+                {
+                    FileManager.CurrentlyLoadingModel = false;
+                }
 
-                FileManager.CurrentlyLoadingModel = false;
             }
         }
 
-        private async Task LoadModelAsync(SessionOptions sessionOptions, string modelPath, bool useDirectML)
+        private Task LoadModelAsync(string modelPath, bool failure = false) // default value for failure is false, obviously
         {
             try
             {
-                if (useDirectML) { sessionOptions.AppendExecutionProvider_DML(); }
-                else { sessionOptions.AppendExecutionProvider_CPU(); }
+                if (!failure)
+                {
+                    switch (Dictionary.dropdownState["Execution Provider"])
+                    {
+                        case "TensorRT":
+                            var tensorrtOptions = new OrtTensorRTProviderOptions();
 
-                _onnxModel = new InferenceSession(modelPath, sessionOptions);
+                            tensorrtOptions.UpdateOptions(new Dictionary<string, string>
+                        {
+                            { "device_id", "0" }, // 1 for true 0 for false
+                            { "trt_fp16_enable", "1" },
+                            { "trt_engine_cache_enable", "1" },
+                            { "trt_engine_cache_path", "bin/tensorrt_cache" }
+                        });
+
+                            LogManager.Log(LogLevel.Info, $"{modelPath} {Path.ChangeExtension(modelPath, ".engine")}");
+                            LogManager.Log(LogLevel.Info, "Loading model with TensorRT, expect long model load time.", true, 15000);
+
+                            sessionOptions.AppendExecutionProvider_Tensorrt(tensorrtOptions);
+                            break;
+                        case "CUDA":
+                            LogManager.Log(LogLevel.Info, "Loading model with CUDA execution provider.", false);
+                            sessionOptions.AppendExecutionProvider_CUDA();
+                            break;
+                        default:
+                            LogManager.Log(LogLevel.Info, "Loading model with CPU execution provider.", false);
+                            sessionOptions.AppendExecutionProvider_CPU(); // Fallback to CPU if no other provider is selected
+                            break;
+                    }
+                }
+                else
+                {
+                    sessionOptions.AppendExecutionProvider_CPU();
+                }
+
+                var cts = new CancellationTokenSource(TimeSpan.FromMinutes(2));
+                _onnxModel = Task.Run(() => new InferenceSession(modelPath, sessionOptions), cts.Token).Result;
+                //_onnxModel = new InferenceSession(modelPath, sessionOptions);
                 _outputNames = new List<string>(_onnxModel.OutputMetadata.Keys);
 
+                LogManager.Log(LogLevel.Info, $"Model loaded successfully: {modelPath}");
                 // Validate the onnx model output shape (ensure model is OnnxV8)
                 if (!ValidateOnnxShape())
                 {
                     _onnxModel?.Dispose();
-                    return; // Exit early if validation fails
+                    //return; // Exit early if validation fails
+                }
+            }
+            catch (OnnxRuntimeException ex)
+            {
+                string? message = null, title = null;
+
+                bool hasTensorRTError = ex.Message.Contains("TensorRT execution provider is not enabled in this build") ||
+                                        (ex.Message.Contains("LoadLibrary failed with error 126") && ex.Message.Contains("onnxruntime_providers_tensorrt.dll"));
+
+                bool hasCUDAError = ex.Message.Contains("CUDA execution provider is not enabled in this build") ||
+                                    (ex.Message.Contains("LoadLibrary failed with error 126") && ex.Message.Contains("onnxruntime_providers_cuda.dll"));
+
+                if (hasTensorRTError)
+                {
+                    if (RequirementsManager.IsTensorRTInstalled())
+                    {
+                        message = "TensorRT has been found by Aimmy, but not by ONNX. Please check your configuration.\nHint: Check CUDNN and your CUDA, and install dependencies to PATH correctly.";
+                        title = "Configuration Error";
+                    }
+                    else
+                    {
+                        message = "TensorRT execution provider has not been found on your build. Please check your configuration.\nHint: Download TensorRT 10.3.x and install the LIB folder to PATH.";
+                        title = "TensorRT Error";
+                    }
+                }
+                else if (hasCUDAError)
+                {
+                    if (RequirementsManager.IsCUDAInstalled() && RequirementsManager.IsCUDNNInstalled())
+                    {
+                        message = "CUDA & CUDNN have been found by Aimmy, but not by ONNX. Please check your configuration.\nHint: Check CUDNN and your CUDA installations, path, etc. PATH directories should point directly towards the DLLs.";
+                        title = "Configuration Error";
+                    }
+                    else
+                    {
+                        message = "CUDA execution provider has not been found on your build. Please check your configuration.\nHint: Download CUDA 12.x. Then install CUDNN 9.x to your PATH (or install the DLL included with Aimmy).";
+                        title = "CUDA Error";
+                    }
                 }
 
-                // Pre-allocate bitmap buffer
-                _bitmapBuffer = new byte[3 * IMAGE_SIZE * IMAGE_SIZE];
+                if (message != null)
+                {
+                    MessageBox.Show(message, title!, MessageBoxButton.OK, MessageBoxImage.Error);
+                    LogManager.Log(LogLevel.Error, message);
+                }
+
             }
             catch (Exception ex)
             {
                 LogManager.Log(LogLevel.Error, $"Error loading the model: {ex.Message}", true);
                 _onnxModel?.Dispose();
-                return;
+            }
+            finally
+            {
+                if (_onnxModel?.OutputMetadata != null && _onnxModel.OutputMetadata.Count > 0)
+                {
+                    LogManager.Log(LogLevel.Info, "Starting AI Loop", false);
+                    // Begin the loop
+                    _isAiLoopRunning = true;
+                    _aiLoopThread = new Thread(AiLoop)
+                    {
+                        IsBackground = true,
+                        Priority = ThreadPriority.AboveNormal // Higher priority for AI thread
+                    };
+                    _aiLoopThread.Start();
+                }
+                else
+                {
+                    LogManager.Log(LogLevel.Error, "Model not loaded - skipping AI loop start");
+                }
             }
 
-            // Begin the loop
-            _isAiLoopRunning = true;
-            _aiLoopThread = new Thread(AiLoop)
-            {
-                IsBackground = true,
-                Priority = ThreadPriority.AboveNormal // Higher priority for AI thread
-            };
-            _aiLoopThread.Start();
+            return Task.CompletedTask;
         }
 
         private int CalculateNumDetections(int imageSize)
@@ -1254,7 +1335,6 @@ namespace Aimmy2.AILogic
             _reusableInputs = null;
             _onnxModel?.Dispose();
             _modeloptions?.Dispose();
-            _bitmapBuffer = null;
             _captureManager.screenCaptureBitmap?.Dispose();
         }
 

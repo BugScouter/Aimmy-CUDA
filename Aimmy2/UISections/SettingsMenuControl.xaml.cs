@@ -177,9 +177,21 @@ namespace Aimmy2.Controls
                 .AddDropdown("Screen Capture Method", d =>
                 {
                     uiManager.D_ScreenCaptureMethod = d;
-                    d.DropdownBox.SelectedIndex = -1;  // Prevent auto-selection
+                    //d.DropdownBox.SelectedIndex = -1;  // Prevent auto-selection
                     _mainWindow.AddDropdownItem(d, "DirectX");
                     _mainWindow.AddDropdownItem(d, "GDI+");
+                })
+                .AddDropdown("Execution Provider", d =>
+                {
+                    uiManager.D_ScreenCaptureMethod = d;
+                    //d.DropdownBox.SelectedIndex = -1; 
+                    uiManager.DDI_CUDA = _mainWindow.AddDropdownItem(d, "CUDA");
+                    uiManager.DDI_TensorRT = _mainWindow.AddDropdownItem(d, "TensorRT");
+                    uiManager.DDI_CPU = _mainWindow.AddDropdownItem(d, "CPU");
+
+                    uiManager.DDI_CUDA.Selected += OnExecutionProviderSelected;
+                    uiManager.DDI_TensorRT.Selected += OnExecutionProviderSelected;
+                    uiManager.DDI_CPU.Selected += OnExecutionProviderSelected;
                 })
                 .AddDropdown("Image Size", d =>
                 {
@@ -245,6 +257,7 @@ namespace Aimmy2.Controls
 
                             // Create new AIManager with the new size
                             FileManager.AIManager = new AIManager(modelPath);
+
 
                             LogManager.Log(LogLevel.Info, $"Successfully changed image size to {newSize}x{newSize}", true, 2000);
                         }
@@ -384,7 +397,18 @@ namespace Aimmy2.Controls
         {
             Dictionary.sliderSettings["SelectedDisplay"] = e.DisplayIndex;
         }
+        static void OnExecutionProviderSelected(object sender, RoutedEventArgs e)
+        {
+            if (Dictionary.dropdownState["Execution Provider"] == "TensorRT")
+            {
+                if (!RequirementsManager.IsTensorRTInstalled())
+                {
+                    LogManager.Log(LogLevel.Warning, "TensorRT may not be installed, the program may not work with TensorRT", true);
+                }
+            }
 
+            LogManager.Log(LogLevel.Info, "Load a new model to initialize new Execution Provider", true);
+        }
         private async Task ResetToMouseEvent()
         {
             await Task.Delay(500);
