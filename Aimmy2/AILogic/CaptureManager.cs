@@ -20,6 +20,7 @@ namespace AILogic
 
         // Capturing
         public Bitmap? screenCaptureBitmap { get; private set; }
+        public Bitmap? directXBitmap { get; private set; }
         private ID3D11Device? _dxDevice;
         private IDXGIOutputDuplication? _deskDuplication;
         private ID3D11Texture2D? _stagingTex;
@@ -244,6 +245,10 @@ namespace AILogic
             int h = detectionBox.Height;
             bool frameAcquired = false;
             IDXGIResource? desktopResource = null;
+
+
+            Bitmap? resultBitmap = null;
+
             try
             {
 
@@ -265,6 +270,12 @@ namespace AILogic
                         lock (_displayLock) { _displayChangesPending = true; }
                         return GetCachedFrame(detectionBox);
                     }
+                }
+
+                if (directXBitmap == null || directXBitmap.Width != w || directXBitmap.Height != h)
+                {
+                    directXBitmap?.Dispose();
+                    directXBitmap = new Bitmap(w, h, PixelFormat.Format32bppArgb);
                 }
 
                 // Check if we need new staging texture - always match requested size
@@ -347,14 +358,19 @@ namespace AILogic
                                (uint)(srcTop - relativeDetectionTop),
                                0,
                                screenTexture, 0, box);
+                    } 
+                    else
+                    {
+                        LogManager.Log(LogLevel.Warning, "No visible region to copy from DirectX capture.", true, 3000);
+                        return GetCachedFrame(detectionBox);
                     }
+
                     #endregion
 
                     #region Bitmap
-                    Bitmap? currentBitmap = new Bitmap(w, h, PixelFormat.Format32bppArgb);
                     var map = _dxDevice.ImmediateContext.Map(_stagingTex, 0, MapMode.Read, Vortice.Direct3D11.MapFlags.None);
                     var boundsRect = new Rectangle(0, 0, w, h);
-                    BitmapData? mapDest = currentBitmap.LockBits(boundsRect, ImageLockMode.WriteOnly, currentBitmap.PixelFormat);
+                    BitmapData? mapDest = directXBitmap.LockBits(boundsRect, ImageLockMode.WriteOnly, directXBitmap.PixelFormat);
 
                     try
                     {
@@ -364,67 +380,49 @@ namespace AILogic
                             byte* dst = (byte*)mapDest.Scan0;
                             int srcStride = (int)map.RowPitch;
                             int dstStride = mapDest.Stride;
-                            int bytesPerRow = w * 4;
 
-                            bool strideMatch = srcStride == dstStride;
-
-                            // Check if we can do bulk copy
-                            if (strideMatch && _lastStrideMatch &&
-                               srcStride == _lastSrcStride &&
-                               dstStride == _lastDstStride)
+                            int copyBytesPerRow = Math.Min(srcStride, dstStride);
+                            for (int y = 0; y < h; y++)
                             {
-                                Buffer.MemoryCopy(src, dst, dstStride * h, srcStride * h);
-                            }
-                            else
-                            {
-                                int copyWidth = Math.Min(srcStride, dstStride);
-                                for (int y = 0; y < h; y++)
-                                {
-                                    Buffer.MemoryCopy(
-                                        src, dst,
-                                        bytesPerRow,
-                                        bytesPerRow
-                                    );
-                                    src += srcStride;
-                                    dst += dstStride;
-                                }
-
-                                _lastStrideMatch = strideMatch;
-                                _lastSrcStride = srcStride;
-                                _lastDstStride = dstStride;
+                                Buffer.MemoryCopy(src, dst, dstStride, copyBytesPerRow);
+                                src += srcStride;
+                                dst += dstStride;
                             }
 
-                            if (Dictionary.toggleState["Third Person Support"])
+                            if (Dictionary.toggleState["Third Person Support"]) // a mask basically
                             {
                                 int width = w / 2;
                                 int height = h / 2;
                                 int startY = h - height;
 
-                                byte* dstPtr = (byte*)mapDest.Scan0;
+                                byte* basePtr = (byte*)mapDest.Scan0;
                                 for (int y = startY; y < h; y++)
                                 {
-                                    byte* rowPtr = dstPtr + (y * dstStride);
+                                    byte* rowPtr = basePtr + (y * dstStride);
                                     for (int x = 0; x < width; x++)
                                     {
                                         int pixelOffset = x * 4;
-                                        rowPtr[pixelOffset] = 0; // R
-                                        rowPtr[pixelOffset + 1] = 0; // G
-                                        rowPtr[pixelOffset + 2] = 0; // B
-                                        rowPtr[pixelOffset + 3] = 255; // A
+                                        // Pixel layout: [B, G, R, A]
+                                        rowPtr[pixelOffset + 0] = 0;   // Blue -> 0
+                                        rowPtr[pixelOffset + 1] = 0;   // Green -> 0
+                                        rowPtr[pixelOffset + 2] = 0;   // Red -> 0
+                                        rowPtr[pixelOffset + 3] = 255; // Alpha -> 255 (opaque)
                                     }
                                 }
                             }
                         }
-
-                        UpdateCache(currentBitmap, detectionBox);
-                        return currentBitmap;
                         #endregion
                     }
                     finally
                     {
-                        currentBitmap.UnlockBits(mapDest);
+                        directXBitmap.UnlockBits(mapDest);
                         _dxDevice.ImmediateContext.Unmap(_stagingTex, 0);
                     }
+
+
+                    resultBitmap = (Bitmap)directXBitmap.Clone();
+                    UpdateCache(resultBitmap, detectionBox);
+                    return resultBitmap;
                 }
             }
             catch (Exception e)
@@ -549,6 +547,10 @@ namespace AILogic
                 // Dispose bitmap when switching methods
                 screenCaptureBitmap?.Dispose();
                 screenCaptureBitmap = null;
+
+                directXBitmap?.Dispose();
+                directXBitmap = null;
+
                 _currentCaptureMethod = selectedMethod;
                 _notificationShown = false; // Reset notification flag on method change
 
@@ -616,6 +618,7 @@ namespace AILogic
             DisplayManager.DisplayChanged -= OnDisplayChanged;
             DisposeDxgiResources();
             screenCaptureBitmap?.Dispose();
+            directXBitmap?.Dispose();
         }
         #endregion
     }

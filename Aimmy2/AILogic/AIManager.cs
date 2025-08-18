@@ -60,14 +60,7 @@ namespace Aimmy2.AILogic
         private KalmanPrediction kalmanPrediction;
         private WiseTheFoxPrediction wtfpredictionManager;
 
-        private SessionOptions sessionOptions = new()
-        {
-            EnableCpuMemArena = true,
-            EnableMemoryPattern = false,
-            GraphOptimizationLevel = GraphOptimizationLevel.ORT_ENABLE_ALL,
-            ExecutionMode = ExecutionMode.ORT_PARALLEL
-
-        };
+        
 
         // Display-aware properties
         private int ScreenWidth => DisplayManager.ScreenWidth;
@@ -102,9 +95,12 @@ namespace Aimmy2.AILogic
         private int iterationCount = 0;
         private long totalTime = 0;
 
+
+        //AI Detection Coordinates
         private int detectedX { get; set; }
         private int detectedY { get; set; }
 
+        // current target
         public double AIConf = 0;
         private static int targetX, targetY;
 
@@ -123,6 +119,7 @@ namespace Aimmy2.AILogic
 
 
         private readonly CaptureManager _captureManager = new();
+
         #endregion Variables
 
         #region Benchmarking
@@ -261,6 +258,14 @@ namespace Aimmy2.AILogic
         {
             try
             {
+                using SessionOptions sessionOptions = new()
+                {
+                    EnableCpuMemArena = true,
+                    EnableMemoryPattern = false,
+                    GraphOptimizationLevel = GraphOptimizationLevel.ORT_ENABLE_ALL,
+                    ExecutionMode = ExecutionMode.ORT_PARALLEL
+                };
+
                 if (!failure)
                 {
                     switch (Dictionary.dropdownState["Execution Provider"])
@@ -309,6 +314,8 @@ namespace Aimmy2.AILogic
                     //return; // Exit early if validation fails
                 }
             }
+            #region Handling Exceptions 
+            //(There are many precautions here because users are not very careful with their installations)
             catch (OnnxRuntimeException ex)
             {
                 string? message = null, title = null;
@@ -358,19 +365,20 @@ namespace Aimmy2.AILogic
                 Log(LogLevel.Error, $"Error loading the model: {ex.Message}", true);
                 _onnxModel?.Dispose();
             }
+            #endregion
             finally
             {
                 if (_onnxModel?.OutputMetadata != null && _onnxModel.OutputMetadata.Count > 0)
                 {
                     Log(LogLevel.Info, "Starting AI Loop", false);
-                    // Begin the loop
                     _isAiLoopRunning = true;
-                    _aiLoopThread = new Thread(AiLoop)
+                    _aiLoopThread = new Thread(AiLoop) 
                     {
                         IsBackground = true,
-                        Priority = ThreadPriority.AboveNormal // Higher priority for AI thread
+                        Priority = ThreadPriority.AboveNormal
                     };
                     _aiLoopThread.Start();
+                    // Begin the loop
                 }
                 else
                 {
@@ -562,7 +570,7 @@ namespace Aimmy2.AILogic
             Dictionary.toggleState["Show Detected Player"] ||
             Dictionary.toggleState["Auto Trigger"];
 
-        private async void AiLoop()
+        private async void AiLoop() 
         {
             Stopwatch stopwatch = new();
             DetectedPlayerWindow? DetectedPlayerOverlay = Dictionary.DetectedPlayerOverlay;
@@ -580,8 +588,6 @@ namespace Aimmy2.AILogic
                 }
 
                 stopwatch.Restart();
-
-                // Handle any pending display changes
                 _captureManager.HandlePendingDisplayChanges();
 
                 using (Benchmark("AILoopIteration"))
@@ -644,10 +650,14 @@ namespace Aimmy2.AILogic
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
         private async Task AutoTrigger()
         {
+            // if auto trigger is disabled,
+            // or if the aim keybinds are not held,
+            // or if constant AI tracking is enabled,
+            // we check for spray release and return
             if (!Dictionary.toggleState["Auto Trigger"] ||
-                !(InputBindingManager.IsHoldingBinding("Aim Keybind") ||
-                !(InputBindingManager.IsHoldingBinding("Second Aim Keybind"))) ||
-                Dictionary.toggleState["Constant AI Tracking"])
+                !(InputBindingManager.IsHoldingBinding("Aim Keybind") && !InputBindingManager.IsHoldingBinding("Second Aim Keybind")) ||
+                Dictionary.toggleState["Constant AI Tracking"]) // this logic is a bit weird, but it works.
+                                                                // but it might need to be revised
             {
                 CheckSprayRelease();
                 return;
@@ -682,14 +692,17 @@ namespace Aimmy2.AILogic
             if (!Dictionary.toggleState["Aim Assist"] || !Dictionary.toggleState["Show Detected Player"]) return;
 
         }
-        private void CheckSprayRelease()
+        private void CheckSprayRelease() 
         {
             if (!Dictionary.toggleState["Spray Mode"]) return;
 
+            // if auto trigger is disabled, we reset the spray state
+            // if the aim keybinds are not held, we reset the spray state
             bool shouldSpray = Dictionary.toggleState["Auto Trigger"] &&
-                ((InputBindingManager.IsHoldingBinding("Aim Keybind") || InputBindingManager.IsHoldingBinding("Second Aim Keybind")) ||
-                Dictionary.toggleState["Constant AI Tracking"]);
+                (InputBindingManager.IsHoldingBinding("Aim Keybind") && InputBindingManager.IsHoldingBinding("Second Aim Keybind")); //||
+                                                                                                                                     //Dictionary.toggleState["Constant AI Tracking"];
 
+            // spray mode might need to be revised.
             if (!shouldSpray)
             {
                 MouseManager.ResetSprayState();
@@ -921,21 +934,39 @@ namespace Aimmy2.AILogic
                 (KDpoints, KDPredictions) = PrepareKDTreeData(outputTensor, detectionBox, fovMinX, fovMaxX, fovMinY, fovMaxY);
             }
 
+            results.Dispose(); // fix memory leak
+            
             if (KDpoints.Count == 0 || KDPredictions.Count == 0)
             {
                 SaveFrame(frame);
                 return null;
             }
 
-            KDTree<double, Prediction> tree;
-            Tuple<double[], Prediction>[]? nearest;
-            using (Benchmark("KDTreeOperations"))
-            {
-                tree = new KDTree<double, Prediction>(2, KDpoints.ToArray(), KDPredictions.ToArray(), L2Norm_Squared_Double);
-                nearest = tree.NearestNeighbors(new double[] { IMAGE_SIZE / 2.0, IMAGE_SIZE / 2.0 }, 1);
-            }
+            //KDTree<double, Prediction> tree;
+            //Tuple<double[], Prediction>[]? nearest;
+            //using (Benchmark("KDTreeOperations"))
+            //{
+            //    tree = new KDTree<double, Prediction>(2, KDpoints.ToArray(), KDPredictions.ToArray(), L2Norm_Squared_Double);
+            //    nearest = tree.NearestNeighbors(new double[] { IMAGE_SIZE / 2.0, IMAGE_SIZE / 2.0 }, 1);
+            //}
 
-            Prediction? bestCandidate = (nearest.Length > 0) ? nearest[0].Item2 : null;
+            //Prediction? bestCandidate = (nearest.Length > 0) ? nearest[0].Item2 : null;
+
+            Prediction? bestCandidate = null;
+            double bestDistSq = double.MaxValue;
+            double center = IMAGE_SIZE / 2.0;
+
+            using (Benchmark("LinearSearch"))
+            {
+                foreach (var p in KDPredictions)
+                {
+                    var dx = p.CenterXTranslated * IMAGE_SIZE - center; // or use x_center from KDpoints
+                    var dy = p.CenterYTranslated * IMAGE_SIZE - center;
+                    double d2 = dx * dx + dy * dy; // dx^2 + dy^2
+
+                    if (d2 < bestDistSq) { bestDistSq = d2; bestCandidate = p; }
+                }
+            }
 
             Prediction? finalTarget = HandleStickyAim(bestCandidate, KDPredictions);
             if (finalTarget != null)
@@ -945,6 +976,7 @@ namespace Aimmy2.AILogic
                 return finalTarget;
             }
 
+            frame.Dispose();
             return null;
         }
         private Prediction? HandleStickyAim(Prediction? bestCandidate, List<Prediction> KDPredictions)
@@ -991,7 +1023,9 @@ namespace Aimmy2.AILogic
             CenterXTranslated = target.CenterXTranslated;
             CenterYTranslated = target.CenterYTranslated;
         }
-        private (List<double[]>, List<Prediction>) PrepareKDTreeData(Tensor<float> outputTensor, Rectangle detectionBox,
+        private (List<double[]>, List<Prediction>) PrepareKDTreeData(
+            Tensor<float> outputTensor, 
+            Rectangle detectionBox,
             float fovMinX, float fovMaxX, float fovMinY, float fovMaxY)
         {
             float minConfidence = (float)Dictionary.sliderSettings["AI Minimum Confidence"] / 100.0f;
@@ -1052,8 +1086,10 @@ namespace Aimmy2.AILogic
                     Confidence = bestConfidence,
                     ClassId = bestClassId,
                     ClassName = _modelClasses.GetValueOrDefault(bestClassId, $"Class_{bestClassId}"),
-                    CenterXTranslated = (x_center - detectionBox.Left) / IMAGE_SIZE,
-                    CenterYTranslated = (y_center - detectionBox.Top) / IMAGE_SIZE,
+                    CenterXTranslated = x_center / IMAGE_SIZE, // !! CenterXTranslated is normalized to [0, 1]
+                    CenterYTranslated = y_center / IMAGE_SIZE,
+                    //CenterXTranslated = (x_center - detectionBox.Left) / IMAGE_SIZE,
+                    //CenterYTranslated = (y_center - detectionBox.Top) / IMAGE_SIZE,
                     ScreenCenterX = detectionBox.Left + x_center,
                     ScreenCenterY = detectionBox.Top + y_center
                 };
@@ -1070,7 +1106,6 @@ namespace Aimmy2.AILogic
         #endregion AI
 
         #region Screen Capture
-
         private void SaveFrame(Bitmap frame, Prediction? DoLabel = null)
         {
             // Only save frames if "Collect Data While Playing" is enabled
@@ -1103,9 +1138,6 @@ namespace Aimmy2.AILogic
                 File.WriteAllText(labelPath, $"{DoLabel.ClassId} {x} {y} {width} {height}");
             }
         }
-
-
-
         #endregion Screen Capture
 
 
@@ -1132,7 +1164,6 @@ namespace Aimmy2.AILogic
             PrintBenchmarks();
 
             // Dispose DXGI objects
-            _captureManager.DisposeDxgiResources();
             _captureManager.Dispose();
 
             // Clean up other resources
@@ -1140,7 +1171,6 @@ namespace Aimmy2.AILogic
             _reusableInputs = null;
             _onnxModel?.Dispose();
             _modeloptions?.Dispose();
-            _captureManager.screenCaptureBitmap?.Dispose();
         }
     }
     public class Prediction
