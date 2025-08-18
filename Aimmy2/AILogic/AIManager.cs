@@ -190,12 +190,13 @@ namespace Aimmy2.AILogic
                     var data = kvp.Value;
                     lines.Add($"{kvp.Key}: Avg={data.AverageTime:F2}ms, Min={data.MinTime}ms, Max={data.MaxTime}ms, Count={data.CallCount}");
                 }
+                var overallFps = iterationCount > 0 && totalTime > 0 ? 1000.0 * iterationCount / totalTime : 0;
 
-                lines.Add($"Overall FPS: {(1000.0 / ((double)totalTime / iterationCount)):F2}");
+                lines.Add($"Overall FPS: {overallFps:F2}");
 
                 //File.WriteAllLines("AIManager_Benchmarks.txt", lines);
 
-                LogManager.Log(LogManager.LogLevel.Info, string.Join(Environment.NewLine, lines));
+                Log(LogLevel.Info, string.Join(Environment.NewLine, lines));
             }
         }
 
@@ -982,12 +983,18 @@ namespace Aimmy2.AILogic
         private Prediction? HandleStickyAim(Prediction? bestCandidate, List<Prediction> KDPredictions)
         {
             bool stickyAimEnabled = Dictionary.toggleState["Sticky Aim"];
-            if (!stickyAimEnabled) return bestCandidate;
+            if (!stickyAimEnabled)
+            {
+                _currentTarget = bestCandidate; // update anyway
+                return bestCandidate;
+            }
+
+            float thresholdSqr = (float)Math.Pow(Dictionary.sliderSettings["Sticky Aim Threshold"], 2);
+
             if (_currentTarget != null)
             {
                 Prediction? matchedTarget = null;
                 float minSqrDistance = float.MaxValue;
-                float thresholdSqr = (float)Math.Pow(Dictionary.sliderSettings["Sticky Aim Threshold"], 2);
 
                 foreach (var candidate in KDPredictions)
                 {
@@ -1002,14 +1009,21 @@ namespace Aimmy2.AILogic
                 if (matchedTarget != null)
                 {
                     _consecutiveFramesWithoutTarget = 0;
+                    _currentTarget = matchedTarget;
                     return matchedTarget;
                 }
 
                 if (++_consecutiveFramesWithoutTarget > MAX_FRAMES_WITHOUT_TARGET)
                 {
                     _currentTarget = null;
+                } else
+                {
+                    return null; // No match found, keep the current target
                 }
             }
+
+            // acquire a new target
+            _currentTarget = bestCandidate;
             return bestCandidate;
         }
 

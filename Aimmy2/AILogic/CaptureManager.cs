@@ -597,7 +597,7 @@ namespace AILogic
                     _stagingTex?.Dispose();
                     _dxDevice?.Dispose();
                     _cachedFrame?.Dispose();
-                    //screenCaptureBitmap?.Dispose();
+                    directXBitmap?.Dispose();
 
                     _deskDuplication = null;
                     _stagingTex = null;
@@ -618,7 +618,6 @@ namespace AILogic
             DisplayManager.DisplayChanged -= OnDisplayChanged;
             DisposeDxgiResources();
             screenCaptureBitmap?.Dispose();
-            directXBitmap?.Dispose();
         }
         #endregion
     }

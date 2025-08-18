@@ -21,7 +21,7 @@ namespace Aimmy2.AILogic
         {
             float dx = a.ScreenCenterX - b.ScreenCenterX;
             float dy = a.ScreenCenterY - b.ScreenCenterY;
-            return (float)Math.Sqrt(dx * dx + dy * dy);
+            return dx * dx + dy * dy; 
         }
 
         public static unsafe void BitmapToFloatArrayInPlace(Bitmap image, float[] result, int IMAGE_SIZE)
