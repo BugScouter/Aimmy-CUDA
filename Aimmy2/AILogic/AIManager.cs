@@ -222,7 +222,7 @@ namespace Aimmy2.AILogic
 
 
             // Attempt to load via CUDA (else fallback to CPU)
-            Task.Run(() => InitializeModel(modelPath));
+            _ = InitializeModel(modelPath);
         }
 
         #region Models
@@ -255,7 +255,7 @@ namespace Aimmy2.AILogic
             }
         }
 
-        private Task LoadModelAsync(string modelPath, bool failure = false) // default value for failure is false, obviously
+        private async Task LoadModelAsync(string modelPath, bool failure = false) // default value for failure is false, obviously
         {
             try
             {
@@ -303,7 +303,7 @@ namespace Aimmy2.AILogic
                 }
 
                 var cts = new CancellationTokenSource(TimeSpan.FromMinutes(2));
-                _onnxModel = Task.Run(() => new InferenceSession(modelPath, sessionOptions), cts.Token).Result;
+                _onnxModel = await Task.Run(() => new InferenceSession(modelPath, sessionOptions), cts.Token);
                 //_onnxModel = new InferenceSession(modelPath, sessionOptions);
                 _outputNames = new List<string>(_onnxModel.OutputMetadata.Keys);
 
@@ -913,13 +913,20 @@ namespace Aimmy2.AILogic
 
             if (_onnxModel == null) return null;
 
-            IDisposableReadOnlyCollection<DisposableNamedOnnxValue> results;
+            //IDisposableReadOnlyCollection<DisposableNamedOnnxValue> results;
+            Tensor<float>? outputTensor = null;
             using (Benchmark("ModelInference"))
             {
-                results = _onnxModel.Run(_reusableInputs, _outputNames, _modeloptions);
+                using var results = _onnxModel.Run(_reusableInputs, _outputNames, _modeloptions);
+                outputTensor = results[0].AsTensor<float>();
             }
 
-            var outputTensor = results[0].AsTensor<float>();
+            if(outputTensor == null)
+            {
+                Log(LogLevel.Error, "Model inference returned null output tensor.", true, 2000);
+                SaveFrame(frame);
+                return null;
+            }
 
             // Calculate the FOV boundaries
             float FovSize = (float)Dictionary.sliderSettings["FOV Size"];
@@ -934,25 +941,13 @@ namespace Aimmy2.AILogic
             {
                 (KDpoints, KDPredictions) = PrepareKDTreeData(outputTensor, detectionBox, fovMinX, fovMaxX, fovMinY, fovMaxY);
             }
-
-            results.Dispose(); // fix memory leak
             
             if (KDpoints.Count == 0 || KDPredictions.Count == 0)
             {
                 SaveFrame(frame);
                 return null;
             }
-
-            //KDTree<double, Prediction> tree;
-            //Tuple<double[], Prediction>[]? nearest;
-            //using (Benchmark("KDTreeOperations"))
-            //{
-            //    tree = new KDTree<double, Prediction>(2, KDpoints.ToArray(), KDPredictions.ToArray(), L2Norm_Squared_Double);
-            //    nearest = tree.NearestNeighbors(new double[] { IMAGE_SIZE / 2.0, IMAGE_SIZE / 2.0 }, 1);
-            //}
-
-            //Prediction? bestCandidate = (nearest.Length > 0) ? nearest[0].Item2 : null;
-
+            // i removed kd tree.
             Prediction? bestCandidate = null;
             double bestDistSq = double.MaxValue;
             double center = IMAGE_SIZE / 2.0;
@@ -1046,8 +1041,8 @@ namespace Aimmy2.AILogic
             string selectedClass = Dictionary.dropdownState["Target Class"];
             int selectedClassId = selectedClass == "Best Confidence" ? -1 : _modelClasses.FirstOrDefault(c => c.Value == selectedClass).Key;
 
-            var KDpoints = new List<double[]>(100); // Pre-allocate with estimated capacity
-            var KDpredictions = new List<Prediction>(100);
+            var KDpoints = new List<double[]>(NUM_DETECTIONS); // Pre-allocate with estimated capacity
+            var KDpredictions = new List<Prediction>(NUM_DETECTIONS);
 
             for (int i = 0; i < NUM_DETECTIONS; i++)
             {
