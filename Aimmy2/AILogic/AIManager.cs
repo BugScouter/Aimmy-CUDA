@@ -255,7 +255,7 @@ namespace Aimmy2.AILogic
             }
         }
 
-        private async Task LoadModelAsync(string modelPath, bool failure = false) // default value for failure is false, obviously
+        private async Task<Task> LoadModelAsync(string modelPath, bool failure = false) // default value for failure is false, obviously
         {
             try
             {
