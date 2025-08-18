@@ -6,7 +6,6 @@ using Microsoft.ML.OnnxRuntime;
 using Microsoft.ML.OnnxRuntime.Tensors;
 using Newtonsoft.Json.Linq;
 using Other;
-using Supercluster.KDTree;
 using System.Diagnostics;
 using System.Drawing;
 using System.Drawing.Imaging;
@@ -14,8 +13,8 @@ using System.IO;
 using System.Runtime.CompilerServices;
 using System.Windows;
 using Visuality;
-using static Other.LogManager;
 using static Aimmy2.AILogic.MathUtil;
+using static Other.LogManager;
 
 namespace Aimmy2.AILogic
 {
@@ -60,7 +59,7 @@ namespace Aimmy2.AILogic
         private KalmanPrediction kalmanPrediction;
         private WiseTheFoxPrediction wtfpredictionManager;
 
-        
+
 
         // Display-aware properties
         private int ScreenWidth => DisplayManager.ScreenWidth;
@@ -72,7 +71,10 @@ namespace Aimmy2.AILogic
         private readonly RunOptions? _modeloptions;
         private InferenceSession? _onnxModel;
 
-        private Thread? _aiLoopThread;
+        //private Thread? _aiLoopThread;
+
+        private Task? _aiLoopTask;
+        private CancellationTokenSource? _cts;
         private volatile bool _isAiLoopRunning;
 
         // For Auto-Labelling Data System
@@ -372,14 +374,12 @@ namespace Aimmy2.AILogic
                 if (_onnxModel?.OutputMetadata != null && _onnxModel.OutputMetadata.Count > 0)
                 {
                     Log(LogLevel.Info, "Starting AI Loop", false);
-                    _isAiLoopRunning = true;
-                    _aiLoopThread = new Thread(AiLoop) 
-                    {
-                        IsBackground = true,
-                        Priority = ThreadPriority.AboveNormal
-                    };
-                    _aiLoopThread.Start();
-                    // Begin the loop
+                    _cts?.Cancel();
+
+                    try { _aiLoopTask?.Wait(500); } catch { }
+                    _cts = new CancellationTokenSource();
+                    _aiLoopTask = Task.Run(() => AiLoop(_cts.Token), _cts.Token);
+                    Log(LogLevel.Info, "AI loop started");
                 }
                 else
                 {
@@ -571,12 +571,12 @@ namespace Aimmy2.AILogic
             Dictionary.toggleState["Show Detected Player"] ||
             Dictionary.toggleState["Auto Trigger"];
 
-        private async void AiLoop() 
+        private async Task AiLoop(CancellationToken ct)
         {
             Stopwatch stopwatch = new();
             DetectedPlayerWindow? DetectedPlayerOverlay = Dictionary.DetectedPlayerOverlay;
 
-            while (_isAiLoopRunning)
+            while (!ct.IsCancellationRequested && _isAiLoopRunning)
             {
                 // Check for pending size changes at the start of each iteration
                 lock (_sizeLock)
@@ -589,6 +589,7 @@ namespace Aimmy2.AILogic
                 }
 
                 stopwatch.Restart();
+
                 _captureManager.HandlePendingDisplayChanges();
 
                 using (Benchmark("AILoopIteration"))
@@ -632,13 +633,13 @@ namespace Aimmy2.AILogic
                         else
                         {
                             // Processing so we are at the ready but not holding right/click.
-                            await Task.Delay(1);
+                            await Task.Delay(1, ct);
                         }
                     }
                     else
                     {
                         // No work to do—sleep briefly to free up CPU
-                        await Task.Delay(1);
+                        await Task.Delay(1, ct);
                     }
                 }
 
@@ -693,7 +694,7 @@ namespace Aimmy2.AILogic
             if (!Dictionary.toggleState["Aim Assist"] || !Dictionary.toggleState["Show Detected Player"]) return;
 
         }
-        private void CheckSprayRelease() 
+        private void CheckSprayRelease()
         {
             if (!Dictionary.toggleState["Spray Mode"]) return;
 
@@ -709,8 +710,6 @@ namespace Aimmy2.AILogic
                 MouseManager.ResetSprayState();
             }
         }
-
-        
 
         private void CalculateCoordinates(DetectedPlayerWindow DetectedPlayerOverlay, Prediction closestPrediction, float scaleX, float scaleY)
         {
@@ -889,9 +888,11 @@ namespace Aimmy2.AILogic
             float[] inputArray;
             using (Benchmark("BitmapToFloatArray"))
             {
-                if (_reusableInputArray == null || _reusableInputArray.Length != 3 * IMAGE_SIZE * IMAGE_SIZE)
+                int requiredLength = 3 * IMAGE_SIZE * IMAGE_SIZE;
+
+                if (_reusableInputArray == null || _reusableInputArray.Length != requiredLength)
                 {
-                    _reusableInputArray = new float[3 * IMAGE_SIZE * IMAGE_SIZE];
+                    _reusableInputArray = new float[requiredLength];
                 }
                 inputArray = _reusableInputArray;
 
@@ -911,7 +912,11 @@ namespace Aimmy2.AILogic
                 inputArray.AsSpan().CopyTo(_reusableTensor.Buffer.Span);
             }
 
-            if (_onnxModel == null) return null;
+            if (_onnxModel == null)
+            {
+                frame.Dispose();
+                return null; // Model not loaded, exit early
+            }
 
             //IDisposableReadOnlyCollection<DisposableNamedOnnxValue> results;
             Tensor<float>? outputTensor = null;
@@ -921,7 +926,7 @@ namespace Aimmy2.AILogic
                 outputTensor = results[0].AsTensor<float>();
             }
 
-            if(outputTensor == null)
+            if (outputTensor == null)
             {
                 Log(LogLevel.Error, "Model inference returned null output tensor.", true, 2000);
                 SaveFrame(frame);
@@ -941,7 +946,7 @@ namespace Aimmy2.AILogic
             {
                 (KDpoints, KDPredictions) = PrepareKDTreeData(outputTensor, detectionBox, fovMinX, fovMaxX, fovMinY, fovMaxY);
             }
-            
+
             if (KDpoints.Count == 0 || KDPredictions.Count == 0)
             {
                 SaveFrame(frame);
@@ -969,6 +974,7 @@ namespace Aimmy2.AILogic
             {
                 UpdateDetectionBox(finalTarget, detectionBox);
                 SaveFrame(frame, finalTarget);
+                frame.Dispose();
                 return finalTarget;
             }
 
@@ -977,14 +983,31 @@ namespace Aimmy2.AILogic
         }
         private Prediction? HandleStickyAim(Prediction? bestCandidate, List<Prediction> KDPredictions)
         {
-            bool stickyAimEnabled = Dictionary.toggleState["Sticky Aim"];
-            if (!stickyAimEnabled)
+            if (!Dictionary.toggleState["Sticky Aim"])
             {
                 _currentTarget = bestCandidate; // update anyway
                 return bestCandidate;
             }
 
-            float thresholdSqr = (float)Math.Pow(Dictionary.sliderSettings["Sticky Aim Threshold"], 2);
+            float threshold = (float)Dictionary.sliderSettings["Sticky Aim Threshold"];
+            float thresholdSqr = threshold * threshold;
+
+            if (bestCandidate == null || KDPredictions == null || KDPredictions.Count == 0)
+            {
+                if (_currentTarget != null)
+                {
+                    if (++_consecutiveFramesWithoutTarget > MAX_FRAMES_WITHOUT_TARGET)
+                    {
+                        _currentTarget = null;
+                        _consecutiveFramesWithoutTarget = 0;
+                    }
+                    // keep previous target while within grace period
+                    return _currentTarget;
+                }
+                return null;
+            }
+            // reset consecutive frames since we have a target
+            _consecutiveFramesWithoutTarget = 0;
 
             if (_currentTarget != null)
             {
@@ -1011,9 +1034,10 @@ namespace Aimmy2.AILogic
                 if (++_consecutiveFramesWithoutTarget > MAX_FRAMES_WITHOUT_TARGET)
                 {
                     _currentTarget = null;
-                } else
+                }
+                else
                 {
-                    return null; // No match found, keep the current target
+                    return _currentTarget;
                 }
             }
 
@@ -1033,7 +1057,7 @@ namespace Aimmy2.AILogic
             CenterYTranslated = target.CenterYTranslated;
         }
         private (List<double[]>, List<Prediction>) PrepareKDTreeData(
-            Tensor<float> outputTensor, 
+            Tensor<float> outputTensor,
             Rectangle detectionBox,
             float fovMinX, float fovMaxX, float fovMinY, float fovMaxY)
         {
@@ -1160,14 +1184,15 @@ namespace Aimmy2.AILogic
 
             // Stop the loop
             _isAiLoopRunning = false;
-            if (_aiLoopThread != null && _aiLoopThread.IsAlive)
+            try
             {
-                if (!_aiLoopThread.Join(TimeSpan.FromSeconds(1)))
+                _cts?.Cancel();
+                if (_aiLoopTask != null)
                 {
-                    try { _aiLoopThread.Interrupt(); }
-                    catch { }
+                    _aiLoopTask.Wait(TimeSpan.FromSeconds(1));
                 }
             }
+            catch { }
 
             // Print final benchmarks
             PrintBenchmarks();
@@ -1178,6 +1203,8 @@ namespace Aimmy2.AILogic
             // Clean up other resources
             _reusableInputArray = null;
             _reusableInputs = null;
+            _reusableTensor = null;
+            _cts?.Dispose();
             _onnxModel?.Dispose();
             _modeloptions?.Dispose();
         }

@@ -398,6 +398,7 @@ namespace Aimmy2
                 fileManager.InQuittingState = true;
             }
 
+            FileManager.AIManager?.Dispose();
             DisableAllFeatures();
             CloseWindows();
             CleanupDrivers();
@@ -410,7 +411,6 @@ namespace Aimmy2
                 settingsMenu.Dispose();
 
             SaveAllConfigurations();
-            FileManager.AIManager?.Dispose();
 
             // Clean up display manager
             DisplayManager.DisplayChanged -= OnDisplayChanged;
