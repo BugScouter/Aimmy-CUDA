@@ -618,6 +618,9 @@ namespace Aimmy2.AILogic
                 if (_reusableInputArray == null || _reusableInputArray.Length != requiredLength)
                 {
                     _reusableInputArray = new float[requiredLength];
+                    // Ensure we force _reusableTensor to be recreated below (since buffer changed)
+                    _reusableTensor = null;
+                    _reusableInputs = null;
                 }
                 inputArray = _reusableInputArray;
 
@@ -665,14 +668,14 @@ namespace Aimmy2.AILogic
             float fovMinY = (IMAGE_SIZE - FovSize) / 2.0f;
             float fovMaxY = (IMAGE_SIZE + FovSize) / 2.0f;
 
-            List<double[]> KDpoints;
+            //List<double[]> KDpoints;
             List<Prediction> KDPredictions;
             using (Benchmark("PrepareKDTreeData"))
             {
-                (KDpoints, KDPredictions) = PrepareKDTreeData(outputTensor, detectionBox, fovMinX, fovMaxX, fovMinY, fovMaxY);
+                 KDPredictions = PrepareKDTreeData(outputTensor, detectionBox, fovMinX, fovMaxX, fovMinY, fovMaxY);
             }
 
-            if (KDpoints.Count == 0 || KDPredictions.Count == 0)
+            if (KDPredictions.Count == 0)
             {
                 SaveFrame(frame);
                 return null;
@@ -778,7 +781,7 @@ namespace Aimmy2.AILogic
             CenterXTranslated = target.CenterXTranslated;
             CenterYTranslated = target.CenterYTranslated;
         }
-        private (List<double[]>, List<Prediction>) PrepareKDTreeData(
+        private List<Prediction> PrepareKDTreeData(
             Tensor<float> outputTensor,
             Rectangle detectionBox,
             float fovMinX, float fovMaxX, float fovMinY, float fovMaxY)
@@ -787,7 +790,7 @@ namespace Aimmy2.AILogic
             string selectedClass = Dictionary.dropdownState["Target Class"];
             int selectedClassId = selectedClass == "Best Confidence" ? -1 : _modelManager.modelClasses.FirstOrDefault(c => c.Value == selectedClass).Key;
 
-            var KDpoints = new List<double[]>(_modelManager.NUM_DETECTIONS); // Pre-allocate with estimated capacity
+            //var KDpoints = new List<double[]>(_modelManager.NUM_DETECTIONS); // Pre-allocate with estimated capacity
             var KDpredictions = new List<Prediction>(_modelManager.NUM_DETECTIONS);
 
             for (int i = 0; i < _modelManager.NUM_DETECTIONS; i++)
@@ -841,19 +844,17 @@ namespace Aimmy2.AILogic
                     Confidence = bestConfidence,
                     ClassId = bestClassId,
                     ClassName = _modelManager.modelClasses.GetValueOrDefault(bestClassId, $"Class_{bestClassId}"),
-                    CenterXTranslated = x_center / IMAGE_SIZE, // !! CenterXTranslated is normalized to [0, 1]
+                    CenterXTranslated = x_center / IMAGE_SIZE, 
                     CenterYTranslated = y_center / IMAGE_SIZE,
-                    //CenterXTranslated = (x_center - detectionBox.Left) / IMAGE_SIZE,
-                    //CenterYTranslated = (y_center - detectionBox.Top) / IMAGE_SIZE,
                     ScreenCenterX = detectionBox.Left + x_center,
                     ScreenCenterY = detectionBox.Top + y_center
                 };
 
-                KDpoints.Add(new double[] { x_center, y_center });
+                //KDpoints.Add(new double[] { x_center, y_center });
                 KDpredictions.Add(prediction);
             }
 
-            return (KDpoints, KDpredictions);
+            return KDpredictions;
         }
 
         #endregion AI Loop Functions

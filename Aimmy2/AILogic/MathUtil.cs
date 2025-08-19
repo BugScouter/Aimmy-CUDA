@@ -1,7 +1,6 @@
 ﻿using System.Drawing;
 using System.Drawing.Imaging;
 using System.Runtime.CompilerServices;
-using static Aimmy2.AILogic.AIManager;
 
 namespace Aimmy2.AILogic
 {
@@ -31,7 +30,7 @@ namespace Aimmy2.AILogic
         {
             float dx = a.ScreenCenterX - b.ScreenCenterX;
             float dy = a.ScreenCenterY - b.ScreenCenterY;
-            return dx * dx + dy * dy; 
+            return dx * dx + dy * dy;
         }
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
         public static float DistanceInImageCoords(Prediction a, Prediction b, int imageSize)
@@ -40,59 +39,125 @@ namespace Aimmy2.AILogic
             float dy = (a.CenterYTranslated - b.CenterYTranslated) * imageSize;
             return dx * dx + dy * dy;
         }
+
+        // LUT = look up table
+        // REFERENCE: https://stackoverflow.com/questions/1089235/where-can-i-find-a-byte-to-float-lookup-table
+        // "In this case, the lookup table should be faster than using direct calculation. The more complex the math (trigonometry, etc.), the bigger the performance gain."
+        // although we used small calculations, something is better than nothing.
+        private static readonly float[] _byteToFloatLut = CreateByteToFloatLut();
+        private static float[] CreateByteToFloatLut()
+        {
+            var lut = new float[256];
+            for (int i = 0; i < 256; i++)
+                lut[i] = i / 255f;
+            return lut;
+        }
+
+        // this new function reduces gc pressure as i stopped using array.copy
+        // REFERENCE: https://www.codeproject.com/Articles/617613/Fast-Pixel-Operations-in-NET-With-and-Without-unsa
         public static unsafe void BitmapToFloatArrayInPlace(Bitmap image, float[] result, int IMAGE_SIZE)
         {
+            if (image == null) throw new ArgumentNullException(nameof(image));
+            if (result == null) throw new ArgumentNullException(nameof(result));
+
             int width = IMAGE_SIZE;
             int height = IMAGE_SIZE;
             int totalPixels = width * height;
-            const float multiplier = 1f / 255f;
 
+            // check if it has the right size
+            if (result.Length != 3 * totalPixels)
+                throw new ArgumentException($"result must be length {3 * totalPixels}", nameof(result));
+
+            //const float multiplier = 1f / 255f; kept for reference
             var rect = new Rectangle(0, 0, width, height);
-            var bmpData = image.LockBits(rect, ImageLockMode.ReadOnly, PixelFormat.Format24bppRgb); //3 bytes per pixel
-                                                                                                    // blue green red (strict order)
+
+            // Lock the bitmap
+            var bmpData = image.LockBits(rect, ImageLockMode.ReadOnly, image.PixelFormat);
             try
             {
-                int stride = bmpData.Stride;
                 byte* basePtr = (byte*)bmpData.Scan0;
-                int redOffset = 0;
-                int greenOffset = totalPixels;
-                int blueOffset = 2 * totalPixels;
 
-                //for each row in the image -> create a temporary array for red green and blue (rgb)
-                Parallel.For(0, height, () => (localR: new float[width], localG: new float[width], localB: new float[width]),
-                (y, state, local) =>
+                //handle negative stride, topdown vs bottomup
+                int stride = Math.Abs(bmpData.Stride);
+
+
+                // array offsets for the three color channels
+                // 32gbpp format is hardcoded but 24bpp is just 3 bytes per pixel
+                const int bytesPerPixel = 4;
+                const int pixelsPerIteration = 4; // process 4 pixels at a time
+                
+                int rOffset = 0; // Red channel starts at index 0
+                int gOffset = totalPixels; // Green channel starts after red
+                int bOffset = totalPixels * 2; // Blue channel starts after green
+
+                // prevent gc from moving the array while we are using it
+                fixed (float* dest = result)
                 {
-                    byte* row = basePtr + (y * stride);
+                    float* rPtr = dest + rOffset; //pointers to the start of each channel
+                    float* gPtr = dest + gOffset; //variables are arranged in RGB but its actually BGR.
+                    float* bPtr = dest + bOffset;
 
-                    // process entire row in local buffers
-                    for (int x = 0; x < width; x++)
+                    // process rows in parallel
+                    Parallel.For(0, height, (y) =>
                     {
-                        int bufferIndex = x * 3;
-                        // BGR byte order: +2 = R, +1 = G, +0 = B
-                        // B = 0
-                        // G = 1
-                        // R = 2
-                        // (bufferIndex + x)
-                        local.localR[x] = row[bufferIndex + 2] * multiplier;
-                        local.localG[x] = row[bufferIndex + 1] * multiplier;
-                        local.localB[x] = row[bufferIndex] * multiplier;
-                    }
+                        byte* row = basePtr + (long)y * stride;
+                        int rowStart = y * width;
+                        int x = 0;
 
-                    // after processing the row copy the results into the final array
-                    int rowStart = y * width;
-                    Array.Copy(local.localR, 0, result, redOffset + rowStart, width);
-                    Array.Copy(local.localG, 0, result, greenOffset + rowStart, width);
-                    Array.Copy(local.localB, 0, result, blueOffset + rowStart, width);
+                        int widthLimit = width - pixelsPerIteration + 1;
+                        // optimize for 4 pixels at a time
+                        // to remove loop overhead and (cache (?))
+                        for (; x < widthLimit; x += pixelsPerIteration)
+                        {
+                            int baseIdx = rowStart + x;
+                            byte* p = row + (x * bytesPerPixel);
 
-                    return local;
-                },
-                _ => { });
+                            // bgr(a) values
+                            // windows bitmap uses BGR order
+
+                            // process 1st pixel / pixel 0 (16bytes)
+                            bPtr[baseIdx] = _byteToFloatLut[p[0]];
+                            gPtr[baseIdx] = _byteToFloatLut[p[1]];
+                            rPtr[baseIdx] = _byteToFloatLut[p[2]];
+                            //alpha is ignored
+
+                            // pixel 1
+                            bPtr[baseIdx + 1] = _byteToFloatLut[p[4]];
+                            gPtr[baseIdx + 1] = _byteToFloatLut[p[5]];
+                            rPtr[baseIdx + 1] = _byteToFloatLut[p[6]];
+                            // pixel 2
+                            bPtr[baseIdx + 2] = _byteToFloatLut[p[8]];
+                            gPtr[baseIdx + 2] = _byteToFloatLut[p[9]];
+                            rPtr[baseIdx + 2] = _byteToFloatLut[p[10]];
+                            // pixel 3
+                            bPtr[baseIdx + 3] = _byteToFloatLut[p[12]];
+                            gPtr[baseIdx + 3] = _byteToFloatLut[p[13]];
+                            rPtr[baseIdx + 3] = _byteToFloatLut[p[14]];
+
+                            p += 16; // move pointer 16 bytes forward (4 pixels * 4 bytes per pixel)
+                        }
+
+                        // handle the rest of the pixels when width is not divisible by 4
+                        for (; x < width; x++)
+                        {
+                            int idx = rowStart + x;
+                            byte* p = row + (x * bytesPerPixel);
+
+                            // process by BGR(a) value like before
+                            bPtr[idx] = _byteToFloatLut[p[0]];
+                            gPtr[idx] = _byteToFloatLut[p[1]];
+                            rPtr[idx] = _byteToFloatLut[p[2]];
+                        }
+                    });
+                }
             }
             finally
             {
+                //unlock the bitmap finally
                 image.UnlockBits(bmpData);
             }
         }
+
 
 
     }
