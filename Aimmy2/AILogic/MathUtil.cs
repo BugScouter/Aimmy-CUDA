@@ -32,13 +32,6 @@ namespace Aimmy2.AILogic
             float dy = a.ScreenCenterY - b.ScreenCenterY;
             return dx * dx + dy * dy;
         }
-        [MethodImpl(MethodImplOptions.AggressiveInlining)]
-        public static float DistanceInImageCoords(Prediction a, Prediction b, int imageSize)
-        {
-            float dx = (a.CenterXTranslated - b.CenterXTranslated) * imageSize;
-            float dy = (a.CenterYTranslated - b.CenterYTranslated) * imageSize;
-            return dx * dx + dy * dy;
-        }
 
         // LUT = look up table
         // REFERENCE: https://stackoverflow.com/questions/1089235/where-can-i-find-a-byte-to-float-lookup-table
@@ -76,10 +69,7 @@ namespace Aimmy2.AILogic
             try
             {
                 byte* basePtr = (byte*)bmpData.Scan0;
-
-                //handle negative stride, topdown vs bottomup
-                int stride = Math.Abs(bmpData.Stride);
-
+                int stride = Math.Abs(bmpData.Stride); //handle negative stride, topdown vs bottomup
 
                 // array offsets for the three color channels
                 // 32gbpp format is hardcoded but 24bpp is just 3 bytes per pixel
