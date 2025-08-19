@@ -1,12 +1,21 @@
 ﻿using System.Drawing;
 using System.Drawing.Imaging;
+using System.Runtime.CompilerServices;
 using static Aimmy2.AILogic.AIManager;
 
 namespace Aimmy2.AILogic
 {
     public static class MathUtil
     {
+        public static int CalculateNumDetections(int imageSize)
+        {
+            // YOLOv8 detection calculation: (size/8)² + (size/16)² + (size/32)²
+            int stride8 = imageSize / 8;
+            int stride16 = imageSize / 16;
+            int stride32 = imageSize / 32;
 
+            return (stride8 * stride8) + (stride16 * stride16) + (stride32 * stride32);
+        }
         public static Func<double[], double[], double> L2Norm_Squared_Double = (x, y) =>
         {
             double dist = 0f;
@@ -17,13 +26,20 @@ namespace Aimmy2.AILogic
 
             return dist;
         };
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
         public static float Distance(Prediction a, Prediction b)
         {
             float dx = a.ScreenCenterX - b.ScreenCenterX;
             float dy = a.ScreenCenterY - b.ScreenCenterY;
             return dx * dx + dy * dy; 
         }
-
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public static float DistanceInImageCoords(Prediction a, Prediction b, int imageSize)
+        {
+            float dx = (a.CenterXTranslated - b.CenterXTranslated) * imageSize;
+            float dy = (a.CenterYTranslated - b.CenterYTranslated) * imageSize;
+            return dx * dx + dy * dy;
+        }
         public static unsafe void BitmapToFloatArrayInPlace(Bitmap image, float[] result, int IMAGE_SIZE)
         {
             int width = IMAGE_SIZE;
@@ -77,5 +93,7 @@ namespace Aimmy2.AILogic
                 image.UnlockBits(bmpData);
             }
         }
+
+
     }
 }

@@ -60,8 +60,8 @@ namespace Aimmy2.Controls
             // Load minimize states from global dictionary if they exist
             LoadMinimizeStatesFromGlobal();
 
-            AIManager.ClassesUpdated += OnClassesChanged;
-            AIManager.ImageSizeUpdated += OnImageSizeChanged;
+            ModelManager.ClassesUpdated += OnClassesChanged;
+            ModelManager.ImageSizeUpdated += OnImageSizeChanged;
 
             // Load all sections
             LoadAimAssist();
@@ -619,7 +619,7 @@ namespace Aimmy2.Controls
                 dropdown.DropdownBox.Items.Remove(item);
             }
 
-            var classes = _classes ?? FileManager.AIManager?.ModelClasses ?? new Dictionary<int, string>();
+            var classes = _classes ?? FileManager.AIManager?.GetModelClasses() ?? new Dictionary<int, string>();
 
             foreach (var kvp in classes.OrderBy(x => x.Key))
             {
