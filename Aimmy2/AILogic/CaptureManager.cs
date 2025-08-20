@@ -246,9 +246,6 @@ namespace AILogic
             bool frameAcquired = false;
             IDXGIResource? desktopResource = null;
 
-
-            Bitmap? resultBitmap = null;
-
             try
             {
 
@@ -326,104 +323,105 @@ namespace AILogic
                 frameAcquired = true;
                 _consecutiveFailures = 0; // Reset on successful acquisition
 
-                using (var screenTexture = desktopResource.QueryInterface<ID3D11Texture2D>())
+                using var screenTexture = desktopResource.QueryInterface<ID3D11Texture2D>();
+                #region Display Bounds
+                var displayBounds = new Rectangle(DisplayManager.ScreenLeft,
+                                              DisplayManager.ScreenTop,
+                                              DisplayManager.ScreenWidth,
+                                              DisplayManager.ScreenHeight);
+
+                // IMPORTANT: Convert absolute screen coordinates to display-relative coordinates
+                // The duplicated output starts at (0,0), not at its screen position
+                int relativeDetectionLeft = detectionBox.Left - DisplayManager.ScreenLeft;
+                int relativeDetectionTop = detectionBox.Top - DisplayManager.ScreenTop;
+                int relativeDetectionRight = relativeDetectionLeft + detectionBox.Width;
+                int relativeDetectionBottom = relativeDetectionTop + detectionBox.Height;
+
+                // Calculate the visible portion in display-relative coordinates
+                int srcLeft = Math.Max(relativeDetectionLeft, 0);
+                int srcTop = Math.Max(relativeDetectionTop, 0);
+                int srcRight = Math.Min(relativeDetectionRight, DisplayManager.ScreenWidth);
+                int srcBottom = Math.Min(relativeDetectionBottom, DisplayManager.ScreenHeight);
+
+                // Only copy if there's a visible region
+                if (srcRight > srcLeft && srcBottom > srcTop)
                 {
-                    #region Display Bounds
-                    var displayBounds = new Rectangle(DisplayManager.ScreenLeft,
-                                                  DisplayManager.ScreenTop,
-                                                  DisplayManager.ScreenWidth,
-                                                  DisplayManager.ScreenHeight);
+                    var box = new Box(srcLeft, srcTop, 0, srcRight, srcBottom, 1);
 
-                    // IMPORTANT: Convert absolute screen coordinates to display-relative coordinates
-                    // The duplicated output starts at (0,0), not at its screen position
-                    int relativeDetectionLeft = detectionBox.Left - DisplayManager.ScreenLeft;
-                    int relativeDetectionTop = detectionBox.Top - DisplayManager.ScreenTop;
-                    int relativeDetectionRight = relativeDetectionLeft + detectionBox.Width;
-                    int relativeDetectionBottom = relativeDetectionTop + detectionBox.Height;
+                    _dxDevice.ImmediateContext.CopySubresourceRegion(
+                           _stagingTex, 0,
+                           (uint)(srcLeft - relativeDetectionLeft),
+                           (uint)(srcTop - relativeDetectionTop),
+                           0,
+                           screenTexture, 0, box);
+                }
+                else
+                {
+                    LogManager.Log(LogLevel.Warning, "No visible region to copy from DirectX capture.", true, 3000);
+                    return GetCachedFrame(detectionBox);
+                }
 
-                    // Calculate the visible portion in display-relative coordinates
-                    int srcLeft = Math.Max(relativeDetectionLeft, 0);
-                    int srcTop = Math.Max(relativeDetectionTop, 0);
-                    int srcRight = Math.Min(relativeDetectionRight, DisplayManager.ScreenWidth);
-                    int srcBottom = Math.Min(relativeDetectionBottom, DisplayManager.ScreenHeight);
+                #endregion
 
-                    // Only copy if there's a visible region
-                    if (srcRight > srcLeft && srcBottom > srcTop)
+                #region Bitmap
+
+                Bitmap? resultBitmap = new(w, h, PixelFormat.Format32bppArgb);
+                var boundsRect = new Rectangle(0, 0, w, h);
+
+                var map = _dxDevice.ImmediateContext.Map(_stagingTex, 0, MapMode.Read, Vortice.Direct3D11.MapFlags.None);
+                BitmapData? mapDest = resultBitmap.LockBits(boundsRect, ImageLockMode.WriteOnly, resultBitmap.PixelFormat);
+
+                try
+                {
+                    unsafe
                     {
-                        var box = new Box(srcLeft, srcTop, 0, srcRight, srcBottom, 1);
+                        byte* src = (byte*)map.DataPointer;
+                        byte* dst = (byte*)mapDest.Scan0;
+                        int srcStride = (int)map.RowPitch;
+                        int dstStride = mapDest.Stride;
+                        int copyBytesPerRow = Math.Min(srcStride, dstStride);
 
-                        _dxDevice.ImmediateContext.CopySubresourceRegion(
-                               _stagingTex, 0,
-                               (uint)(srcLeft - relativeDetectionLeft),
-                               (uint)(srcTop - relativeDetectionTop),
-                               0,
-                               screenTexture, 0, box);
-                    } 
-                    else
-                    {
-                        LogManager.Log(LogLevel.Warning, "No visible region to copy from DirectX capture.", true, 3000);
-                        return GetCachedFrame(detectionBox);
-                    }
-
-                    #endregion
-
-                    #region Bitmap
-                    var map = _dxDevice.ImmediateContext.Map(_stagingTex, 0, MapMode.Read, Vortice.Direct3D11.MapFlags.None);
-                    var boundsRect = new Rectangle(0, 0, w, h);
-                    BitmapData? mapDest = directXBitmap.LockBits(boundsRect, ImageLockMode.WriteOnly, directXBitmap.PixelFormat);
-
-                    try
-                    {
-                        unsafe
+                        for (int y = 0; y < h; y++)
                         {
-                            byte* src = (byte*)map.DataPointer;
-                            byte* dst = (byte*)mapDest.Scan0;
-                            int srcStride = (int)map.RowPitch;
-                            int dstStride = mapDest.Stride;
+                            Buffer.MemoryCopy(src, dst, dstStride, copyBytesPerRow);
+                            src += srcStride;
+                            dst += dstStride;
+                        }
 
-                            int copyBytesPerRow = Math.Min(srcStride, dstStride);
-                            for (int y = 0; y < h; y++)
+                        if (Dictionary.toggleState["Third Person Support"]) // a mask basically
+                        {
+                            int width = w / 2;
+                            int height = h / 2;
+                            int startY = h - height;
+
+                            byte* basePtr = (byte*)mapDest.Scan0;
+                            for (int y = startY; y < h; y++)
                             {
-                                Buffer.MemoryCopy(src, dst, dstStride, copyBytesPerRow);
-                                src += srcStride;
-                                dst += dstStride;
-                            }
-
-                            if (Dictionary.toggleState["Third Person Support"]) // a mask basically
-                            {
-                                int width = w / 2;
-                                int height = h / 2;
-                                int startY = h - height;
-
-                                byte* basePtr = (byte*)mapDest.Scan0;
-                                for (int y = startY; y < h; y++)
+                                byte* rowPtr = basePtr + (y * dstStride);
+                                for (int x = 0; x < width; x++)
                                 {
-                                    byte* rowPtr = basePtr + (y * dstStride);
-                                    for (int x = 0; x < width; x++)
-                                    {
-                                        int pixelOffset = x * 4;
-                                        // Pixel layout: [B, G, R, A]
-                                        rowPtr[pixelOffset + 0] = 0;   // Blue -> 0
-                                        rowPtr[pixelOffset + 1] = 0;   // Green -> 0
-                                        rowPtr[pixelOffset + 2] = 0;   // Red -> 0
-                                        rowPtr[pixelOffset + 3] = 255; // Alpha -> 255 (opaque)
-                                    }
+                                    int pixelOffset = x * 4;
+                                    // Pixel layout: [B, G, R, A]
+                                    rowPtr[pixelOffset + 0] = 0;   // Blue -> 0
+                                    rowPtr[pixelOffset + 1] = 0;   // Green -> 0
+                                    rowPtr[pixelOffset + 2] = 0;   // Red -> 0
+                                    rowPtr[pixelOffset + 3] = 255; // Alpha -> 255 (opaque)
                                 }
                             }
                         }
-                        #endregion
                     }
-                    finally
-                    {
-                        directXBitmap.UnlockBits(mapDest);
-                        _dxDevice.ImmediateContext.Unmap(_stagingTex, 0);
-                    }
-
-
-                    resultBitmap = (Bitmap)directXBitmap.Clone();
-                    UpdateCache(resultBitmap, detectionBox);
-                    return resultBitmap;
+                    #endregion
                 }
+                finally
+                {
+                    resultBitmap.UnlockBits(mapDest);
+                    _dxDevice.ImmediateContext.Unmap(_stagingTex, 0);
+                }
+
+
+                //resultBitmap = (Bitmap)directXBitmap.Clone();
+                UpdateCache(resultBitmap, detectionBox);
+                return resultBitmap;
             }
             catch (Exception e)
             {

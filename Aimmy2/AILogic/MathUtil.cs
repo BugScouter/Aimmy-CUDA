@@ -87,6 +87,10 @@ namespace Aimmy2.AILogic
                     float* gPtr = dest + gOffset; //variables are arranged in RGB but its actually BGR.
                     float* bPtr = dest + bOffset;
 
+
+                    // TODO:
+                    // For common small IMAGE_SIZE (128/224/320) parallel would be slower ... so we will factor that in later.
+
                     // process rows in parallel
                     Parallel.For(0, height, (y) =>
                     {

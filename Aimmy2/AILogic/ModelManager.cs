@@ -1,5 +1,6 @@
 ﻿using Aimmy2.Class;
 using Microsoft.ML.OnnxRuntime;
+using Microsoft.ML.OnnxRuntime.Tensors;
 using Newtonsoft.Json.Linq;
 using Other;
 using System.IO;
@@ -38,7 +39,9 @@ namespace Aimmy2.AILogic
                     EnableCpuMemArena = true,
                     EnableMemoryPattern = false,
                     GraphOptimizationLevel = GraphOptimizationLevel.ORT_ENABLE_ALL,
-                    ExecutionMode = ExecutionMode.ORT_PARALLEL
+                    ExecutionMode = ExecutionMode.ORT_PARALLEL,
+                    IntraOpNumThreads = 1,
+                    InterOpNumThreads = 1
                 };
 
                 if (!failure)
@@ -144,6 +147,8 @@ namespace Aimmy2.AILogic
             #endregion
             //return Task.CompletedTask;
         }
+
+       
 
         public bool ValidateOnnxShape(int IMAGE_SIZE)
         {

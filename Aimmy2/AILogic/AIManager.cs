@@ -326,9 +326,10 @@ namespace Aimmy2.AILogic
                         if (ShouldPredict())
                         {
                             Prediction? closestPrediction;
+
                             using (Benchmark("GetClosestPrediction"))
                             {
-                                closestPrediction = await GetClosestPrediction();
+                                closestPrediction = GetClosestPrediction();
                             }
 
                             if (closestPrediction == null)
@@ -570,9 +571,9 @@ namespace Aimmy2.AILogic
             }
         }
 
-        private async Task<Prediction?> GetClosestPrediction(bool useMousePosition = true)
+        private Prediction? GetClosestPrediction(bool useMousePosition = true)
         {
-            int adjustedTargetX, adjustedTargetY;
+            //int adjustedTargetX, adjustedTargetY;
 
             if (Dictionary.dropdownState["Detection Area Type"] == "Closest to Mouse")
             {
@@ -618,13 +619,11 @@ namespace Aimmy2.AILogic
                 if (_reusableInputArray == null || _reusableInputArray.Length != requiredLength)
                 {
                     _reusableInputArray = new float[requiredLength];
-                    // Ensure we force _reusableTensor to be recreated below (since buffer changed)
                     _reusableTensor = null;
                     _reusableInputs = null;
                 }
                 inputArray = _reusableInputArray;
 
-                // Fill the reusable array
                 BitmapToFloatArrayInPlace(frame, inputArray, IMAGE_SIZE);
             }
 
@@ -634,11 +633,11 @@ namespace Aimmy2.AILogic
                 _reusableTensor = new DenseTensor<float>(inputArray, new int[] { 1, 3, IMAGE_SIZE, IMAGE_SIZE });
                 _reusableInputs = new List<NamedOnnxValue> { NamedOnnxValue.CreateFromTensor("images", _reusableTensor) };
             }
-            else
-            {
-                // Directly copy into existing DenseTensor buffer
-                inputArray.AsSpan().CopyTo(_reusableTensor.Buffer.Span);
-            }
+            //else
+            //{
+            //    // Directly copy into existing DenseTensor buffer
+            //    inputArray.AsSpan().CopyTo(_reusableTensor.Buffer.Span);
+            //}
 
             if (_modelManager.onnxModel == null)
             {
@@ -771,16 +770,7 @@ namespace Aimmy2.AILogic
             return bestCandidate;
         }
 
-        private void UpdateDetectionBox(Prediction target, Rectangle detectionBox)
-        {
-            float translatedXMin = target.Rectangle.X + detectionBox.Left;
-            float translatedYMin = target.Rectangle.Y + detectionBox.Top;
-            LastDetectionBox = new(translatedXMin, translatedYMin,
-                target.Rectangle.Width, target.Rectangle.Height);
-
-            CenterXTranslated = target.CenterXTranslated;
-            CenterYTranslated = target.CenterYTranslated;
-        }
+        
         private List<Prediction> PrepareKDTreeData(
             Tensor<float> outputTensor,
             Rectangle detectionBox,
@@ -788,12 +778,26 @@ namespace Aimmy2.AILogic
         {
             float minConfidence = (float)Dictionary.sliderSettings["AI Minimum Confidence"] / 100.0f;
             string selectedClass = Dictionary.dropdownState["Target Class"];
-            int selectedClassId = selectedClass == "Best Confidence" ? -1 : _modelManager.modelClasses.FirstOrDefault(c => c.Value == selectedClass).Key;
+            int selectedClassId = -1;
+
+
+            int numDetections = _modelManager.NUM_DETECTIONS;
+            int numClasses = _modelManager.NUM_CLASSES;
+            var modelClasses = _modelManager.modelClasses;
+
+            if (selectedClass != "Best Confidence")
+            {
+                foreach (var kv in modelClasses)
+                {
+                    if (kv.Value == selectedClass) { selectedClassId = kv.Key; break; }
+                }
+            }
+
 
             //var KDpoints = new List<double[]>(_modelManager.NUM_DETECTIONS); // Pre-allocate with estimated capacity
-            var KDpredictions = new List<Prediction>(_modelManager.NUM_DETECTIONS);
+            var KDpredictions = new List<Prediction>(numDetections);
 
-            for (int i = 0; i < _modelManager.NUM_DETECTIONS; i++)
+            for (int i = 0; i < numDetections; i++)
             {
                 float x_center = outputTensor[0, 0, i];
                 float y_center = outputTensor[0, 1, i];
@@ -803,7 +807,7 @@ namespace Aimmy2.AILogic
                 int bestClassId = 0;
                 float bestConfidence = 0f;
 
-                if (_modelManager.NUM_CLASSES == 1)
+                if (numClasses == 1)
                 {
                     bestConfidence = outputTensor[0, 4, i];
                 }
@@ -811,7 +815,7 @@ namespace Aimmy2.AILogic
                 {
                     if (selectedClassId == -1)
                     {
-                        for (int classId = 0; classId < _modelManager.NUM_CLASSES; classId++)
+                        for (int classId = 0; classId < numClasses; classId++)
                         {
                             float classConfidence = outputTensor[0, 4 + classId, i];
                             if (classConfidence > bestConfidence)
@@ -843,7 +847,7 @@ namespace Aimmy2.AILogic
                     Rectangle = rect,
                     Confidence = bestConfidence,
                     ClassId = bestClassId,
-                    ClassName = _modelManager.modelClasses.GetValueOrDefault(bestClassId, $"Class_{bestClassId}"),
+                    ClassName = modelClasses.GetValueOrDefault(bestClassId, $"Class_{bestClassId}"),
                     CenterXTranslated = x_center / IMAGE_SIZE, 
                     CenterYTranslated = y_center / IMAGE_SIZE,
                     ScreenCenterX = detectionBox.Left + x_center,
@@ -856,7 +860,16 @@ namespace Aimmy2.AILogic
 
             return KDpredictions;
         }
+        private void UpdateDetectionBox(Prediction target, Rectangle detectionBox)
+        {
+            float translatedXMin = target.Rectangle.X + detectionBox.Left;
+            float translatedYMin = target.Rectangle.Y + detectionBox.Top;
+            LastDetectionBox = new(translatedXMin, translatedYMin,
+                target.Rectangle.Width, target.Rectangle.Height);
 
+            CenterXTranslated = target.CenterXTranslated;
+            CenterYTranslated = target.CenterYTranslated;
+        }
         #endregion AI Loop Functions
 
         #endregion AI
