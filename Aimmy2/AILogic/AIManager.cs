@@ -86,9 +86,22 @@ namespace Aimmy2.AILogic
         private float _scaleY => ScreenHeight / (float)IMAGE_SIZE;
 
         // Tensor reuse (model inference)
-        private DenseTensor<float>? _reusableTensor;
         private float[]? _reusableInputArray;
+        private DenseTensor<float>? _reusableTensor;
         private List<NamedOnnxValue>? _reusableInputs;
+
+        private ushort[]? _inputU16Buffer;
+        private ushort[]? _outputU16Buffer;
+        private float[]? _outputFloatBuffer; // used when output element type == float
+
+        private TensorElementType _modelInputElementType = TensorElementType.Float;
+        private TensorElementType _modelOutputElementType = TensorElementType.Float;
+
+        private OrtIoBinding _ioBinding;
+        private OrtValue _inputOrtValue;
+        private OrtValue _outputOrtValue;
+        private bool _ioBindingInitialized = false;
+        private readonly object _ioBindingLock = new object();
 
         // Benchmarking
         private readonly Dictionary<string, BenchmarkData> _benchmarks = new();
@@ -246,6 +259,159 @@ namespace Aimmy2.AILogic
                 finally
                 {
                     FileManager.CurrentlyLoadingModel = false;
+                }
+            }
+        }
+        // this is a complete mess by the way, needs to be cleaned up at some point
+        // but it works so idc.
+        private void InitializeIOBinding(int imageSize)
+        {
+            if (_ioBindingInitialized &&
+                _reusableTensor != null &&
+                _reusableTensor.Dimensions[2] == imageSize)
+            {
+                return;
+            }
+
+            lock (_ioBindingLock)
+            {
+                if (_modelManager.onnxModel == null)
+                {
+                    return;
+                }
+
+                if (Dictionary.dropdownState["Execution Provider"] == "CPU")
+                {
+                    _ioBindingInitialized = false;
+                    return; // Skip IO Binding for CPU execution
+                }
+                try
+                {
+                    _ioBinding?.Dispose();
+                    _inputOrtValue?.Dispose();
+                    _outputOrtValue?.Dispose();
+                }
+                catch { }
+
+                _ioBinding = null;
+                _inputOrtValue = null;
+                _outputOrtValue = null;
+                _ioBindingInitialized = false;
+
+                try
+                {
+                    var inputMeta = _modelManager.onnxModel.InputMetadata;
+                    var outputMeta = _modelManager.onnxModel.OutputMetadata;
+
+                    if (inputMeta != null &&
+                        inputMeta.TryGetValue(_modelManager.inputName ?? inputMeta.Keys.First(), out var inMeta))
+                    {
+                        _modelInputElementType = inMeta.ElementDataType;
+                    }
+
+
+                    if (_modelManager.outputNames?.Count > 0 &&
+                       outputMeta != null &&
+                       outputMeta.TryGetValue(_modelManager.outputNames[0], out var outMeta))
+                    {
+                        _modelOutputElementType = outMeta.ElementDataType;
+                    }
+
+                    Log(LogLevel.Info, $"Model Input element type: {_modelInputElementType}; Output element type: {_modelOutputElementType}");
+
+                    _ioBinding = _modelManager.onnxModel.CreateIoBinding();
+                    var memoryInfo = OrtMemoryInfo.DefaultInstance; // let ort handle that or whatever
+
+
+                    // INPUT
+                    var inputShape = new long[] { 1, 3, imageSize, imageSize };
+                    int inputLen = (int)(inputShape.Aggregate(1L, (a, b) => a * b));
+
+                    if (_reusableInputArray == null || _reusableInputArray.Length != inputLen)
+                    {
+                        _reusableInputArray = new float[inputLen]; // still used for preprocessing
+                        _reusableTensor = null;
+                        _reusableInputs = null;
+                    }
+
+                    switch (_modelInputElementType)
+                    {
+                        // should mainly be f16
+                        case TensorElementType.Float:
+                            _inputOrtValue = OrtValue.CreateTensorValueFromMemory<float>(
+                                memoryInfo, _reusableInputArray, inputShape);
+                            _ioBinding.BindInput(_modelManager.inputName ?? "images", _inputOrtValue);
+                            Log(LogLevel.Info, "IOBinding: bound float input");
+                            break;
+
+                        case TensorElementType.Float16:
+                            _inputU16Buffer ??= new ushort[inputLen];
+                            if (_inputU16Buffer.Length != inputLen)
+                                _inputU16Buffer = new ushort[inputLen];
+
+                            _inputOrtValue = OrtValue.CreateTensorValueFromMemory<ushort>(
+                                memoryInfo, _inputU16Buffer, inputShape);
+                            _ioBinding.BindInput(_modelManager.inputName ?? "images", _inputOrtValue);
+                            Log(LogLevel.Info, "IOBinding: bound float16 input (ushort buffer)");
+                            break;
+
+                        default:
+                            // iobindinginit would be false but we will handle that in the inference step
+                            throw new NotSupportedException(
+                                $"Unsupported model input element type: {_modelInputElementType}"); // yikes
+                    }
+
+                    // OUTPUT
+                    if (_modelManager.outputNames == null || _modelManager.outputNames.Count == 0)
+                        throw new InvalidOperationException("Model output names are not defined.");
+
+                    var outputShape = new long[] { 1, _modelManager.NUM_CLASSES + 4, _modelManager.NUM_DETECTIONS };
+                    int outputLen = (int)outputShape.Aggregate(1L, (a, b) => a * b);
+                    switch (_modelOutputElementType)
+                    {
+                        case TensorElementType.Float:
+                            _outputFloatBuffer ??= new float[outputLen];
+                            if (_outputFloatBuffer.Length != outputLen)
+                                _outputFloatBuffer = new float[outputLen];
+
+                            _outputOrtValue = OrtValue.CreateTensorValueFromMemory<float>(
+                                memoryInfo, _outputFloatBuffer, outputShape);
+                            _ioBinding.BindOutput(_modelManager.outputNames[0], _outputOrtValue);
+                            Log(LogLevel.Info, "IOBinding: bound float output");
+                            break;
+
+                        case TensorElementType.Float16:
+                            _outputU16Buffer ??= new ushort[outputLen];
+                            if (_outputU16Buffer.Length != outputLen)
+                                _outputU16Buffer = new ushort[outputLen];
+
+                            _outputOrtValue = OrtValue.CreateTensorValueFromMemory<ushort>(
+                                memoryInfo, _outputU16Buffer, outputShape);
+                            _ioBinding.BindOutput(_modelManager.outputNames[0], _outputOrtValue);
+                            Log(LogLevel.Info, "IOBinding: bound float16 output (ushort buffer)");
+                            break;
+
+                        default:
+                            throw new NotSupportedException(
+                                $"Unsupported model output element type: {_modelOutputElementType}");
+                    }
+
+                    _ioBindingInitialized = true;
+                    Log(LogLevel.Info, "IO Binding initialized successfully");
+                }
+                catch (Exception ex)
+                {
+                    // cleanup on failure, keep _ioBindingInitialized false
+                    try { _ioBinding?.Dispose(); } catch { }
+                    try { _inputOrtValue?.Dispose(); } catch { }
+                    try { _outputOrtValue?.Dispose(); } catch { }
+
+                    _ioBinding = null;
+                    _inputOrtValue = null;
+                    _outputOrtValue = null;
+                    _ioBindingInitialized = false;
+
+                    Log(LogLevel.Error, $"Failed to initialize IO Binding: {ex.Message}");
                 }
             }
         }
@@ -627,30 +793,96 @@ namespace Aimmy2.AILogic
                 BitmapToFloatArrayInPlace(frame, inputArray, IMAGE_SIZE);
             }
 
-            // Reuse tensor and inputs - recreate if size changed
-            if (_reusableTensor == null || _reusableTensor.Dimensions[2] != IMAGE_SIZE)
-            {
-                _reusableTensor = new DenseTensor<float>(inputArray, new int[] { 1, 3, IMAGE_SIZE, IMAGE_SIZE });
-                _reusableInputs = new List<NamedOnnxValue> { NamedOnnxValue.CreateFromTensor("images", _reusableTensor) };
-            }
-            //else
-            //{
-            //    // Directly copy into existing DenseTensor buffer
-            //    inputArray.AsSpan().CopyTo(_reusableTensor.Buffer.Span);
-            //}
-
             if (_modelManager.onnxModel == null)
             {
                 frame.Dispose();
                 return null; // Model not loaded, exit early
             }
 
-            //IDisposableReadOnlyCollection<DisposableNamedOnnxValue> results;
+            if (!_ioBindingInitialized ||
+                _reusableTensor == null ||
+                _reusableTensor.Dimensions[2] != IMAGE_SIZE)
+            {
+                using (Benchmark("IOBindingInitialization"))
+                {
+                    InitializeIOBinding(IMAGE_SIZE);
+                }
+            }
+
             Tensor<float>? outputTensor = null;
             using (Benchmark("ModelInference"))
             {
-                using var results = _modelManager.onnxModel.Run(_reusableInputs, _modelManager.outputNames, _modelManager.modelOptions);
-                outputTensor = results[0].AsTensor<float>();
+                try
+                {
+                    if (_ioBindingInitialized && _inputOrtValue != null && _outputOrtValue != null)
+                    {
+                        // convert float into half precision bc of .net
+                        if (_modelInputElementType == TensorElementType.Float16)
+                        {
+                            int len = _reusableInputArray!.Length;
+                            var inputU16 = _inputU16Buffer!;
+                            for (int i = 0; i < len; i++)
+                            {
+                                // clamp to reasonable range first (some models require [0,1])
+                                float v = _reusableInputArray[i];
+                                inputU16[i] = FloatToHalfBits(v);
+                            }
+                        }
+
+                        //run inference as per IO Binding
+                        _modelManager.onnxModel.RunWithBinding(_modelManager.modelOptions, _ioBinding);
+
+                        // im too lazy to turn this into a switch statement
+                        if (_modelOutputElementType == TensorElementType.Float)
+                        {
+                            // get model output
+                            outputTensor = new DenseTensor<float>(_outputFloatBuffer, new int[] { 1, _modelManager.NUM_CLASSES + 4, _modelManager.NUM_DETECTIONS });
+                        }
+                        else if (_modelOutputElementType == TensorElementType.Float16) // usually f16
+                        {
+                            // convert ushort half-bits -> float[] into a temp array
+                            var outU16 = _outputU16Buffer!;
+                            var outFloat = new float[outU16.Length];
+                            for (int i = 0; i < outU16.Length; i++)
+                                outFloat[i] = HalfBitsToFloat(outU16[i]);
+
+                            outputTensor = new DenseTensor<float>(
+                                outFloat,
+                                new int[] { 1, _modelManager.NUM_CLASSES + 4, _modelManager.NUM_DETECTIONS }
+                            );
+                        }
+                        else
+                        { // yikes
+                            throw new NotSupportedException($"Unsupported model output element type: {_modelOutputElementType}");
+                        }
+                    }
+                    else
+                    {
+                        // run it without i/o binding
+                        if (_reusableTensor == null || _reusableTensor.Dimensions[2] != IMAGE_SIZE)
+                        {
+                            _reusableTensor = new DenseTensor<float>(_reusableInputArray, new int[] { 1, 3, IMAGE_SIZE, IMAGE_SIZE });
+
+                            if (_reusableInputs == null)
+                                _reusableInputs = new List<NamedOnnxValue>(1);
+
+                            _reusableInputs.Clear();
+                            _reusableInputs.Add(NamedOnnxValue.CreateFromTensor(_modelManager.inputName ?? "images", _reusableTensor));
+                        }
+                        else
+                        {
+                            _reusableInputArray.AsSpan().CopyTo(_reusableTensor.Buffer.Span);
+                        }
+
+                        using var results = _modelManager.onnxModel.Run(_reusableInputs, _modelManager.outputNames, _modelManager.modelOptions);
+                        outputTensor = results[0].AsTensor<float>();
+                    }
+                }
+                catch (Exception ex)
+                {
+                    Log(LogLevel.Error, $"Inference error: {ex.Message}");
+                    _ioBindingInitialized = false; // Reset IO Binding on error
+                }
             }
 
             if (outputTensor == null)
@@ -667,16 +899,18 @@ namespace Aimmy2.AILogic
             float fovMinY = (IMAGE_SIZE - FovSize) / 2.0f;
             float fovMaxY = (IMAGE_SIZE + FovSize) / 2.0f;
 
+            //we replaced kdtree
             //List<double[]> KDpoints;
             List<Prediction> KDPredictions;
-            using (Benchmark("PrepareKDTreeData"))
+            using (Benchmark("PrepareKDTreeData")) // not really kd tree data anymore
             {
-                 KDPredictions = PrepareKDTreeData(outputTensor, detectionBox, fovMinX, fovMaxX, fovMinY, fovMaxY);
+                KDPredictions = PrepareKDTreeData(outputTensor, detectionBox, fovMinX, fovMaxX, fovMinY, fovMaxY);
             }
 
             if (KDPredictions.Count == 0)
             {
                 SaveFrame(frame);
+                frame.Dispose();
                 return null;
             }
 
@@ -770,16 +1004,16 @@ namespace Aimmy2.AILogic
             return bestCandidate;
         }
 
-        
+        private readonly List<Prediction> _kdPredictions = new(8400);
         private List<Prediction> PrepareKDTreeData(
             Tensor<float> outputTensor,
             Rectangle detectionBox,
             float fovMinX, float fovMaxX, float fovMinY, float fovMaxY)
         {
+            _kdPredictions.Clear();
             float minConfidence = (float)Dictionary.sliderSettings["AI Minimum Confidence"] / 100.0f;
             string selectedClass = Dictionary.dropdownState["Target Class"];
             int selectedClassId = -1;
-
 
             int numDetections = _modelManager.NUM_DETECTIONS;
             int numClasses = _modelManager.NUM_CLASSES;
@@ -795,7 +1029,7 @@ namespace Aimmy2.AILogic
 
 
             //var KDpoints = new List<double[]>(_modelManager.NUM_DETECTIONS); // Pre-allocate with estimated capacity
-            var KDpredictions = new List<Prediction>(numDetections);
+            //var KDpredictions = new List<Prediction>(numDetections);
 
             for (int i = 0; i < numDetections; i++)
             {
@@ -848,17 +1082,17 @@ namespace Aimmy2.AILogic
                     Confidence = bestConfidence,
                     ClassId = bestClassId,
                     ClassName = modelClasses.GetValueOrDefault(bestClassId, $"Class_{bestClassId}"),
-                    CenterXTranslated = x_center / IMAGE_SIZE, 
+                    CenterXTranslated = x_center / IMAGE_SIZE,
                     CenterYTranslated = y_center / IMAGE_SIZE,
                     ScreenCenterX = detectionBox.Left + x_center,
                     ScreenCenterY = detectionBox.Top + y_center
                 };
 
                 //KDpoints.Add(new double[] { x_center, y_center });
-                KDpredictions.Add(prediction);
+                _kdPredictions.Add(prediction);
             }
 
-            return KDpredictions;
+            return _kdPredictions;
         }
         private void UpdateDetectionBox(Prediction target, Rectangle detectionBox)
         {

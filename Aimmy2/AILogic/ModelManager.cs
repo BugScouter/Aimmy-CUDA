@@ -1,6 +1,5 @@
 ﻿using Aimmy2.Class;
 using Microsoft.ML.OnnxRuntime;
-using Microsoft.ML.OnnxRuntime.Tensors;
 using Newtonsoft.Json.Linq;
 using Other;
 using System.IO;
@@ -15,6 +14,9 @@ namespace Aimmy2.AILogic
         public RunOptions? modelOptions { get; set; }
         public InferenceSession? onnxModel { get; private set; }
         public List<string>? outputNames { get; private set; }
+        public string? inputName { get; private set; }
+        public List<string>? inputNames { get; private set; }
+
 
         public int NUM_DETECTIONS { get; set; } = 8400; // Will be set dynamically for dynamic models
         public bool IsDynamicModel { get; set; } = false;
@@ -30,6 +32,9 @@ namespace Aimmy2.AILogic
         public static event Action<int>? ImageSizeUpdated;
 
         public bool isModelLoaded => onnxModel != null && outputNames != null && outputNames.Count > 0;
+
+
+
         public async Task LoadModelAsync(string modelPath, int IMAGE_SIZE, bool failure = false) // default value for failure is false, obviously
         {
             try
@@ -48,6 +53,7 @@ namespace Aimmy2.AILogic
                 {
                     switch (Dictionary.dropdownState["Execution Provider"])
                     {
+                        //TODO: https://onnxruntime.ai/docs/performance/tune-performance/iobinding.html
                         case "TensorRT":
                             var tensorrtOptions = new OrtTensorRTProviderOptions();
 
@@ -55,6 +61,7 @@ namespace Aimmy2.AILogic
                         {
                             { "device_id", "0" }, // 1 for true 0 for false
                             { "trt_fp16_enable", "1" },
+                            //{ "trt_int8_enable", "1" },
                             { "trt_engine_cache_enable", "1" },
                             { "trt_engine_cache_path", "bin/tensorrt_cache" }
                         });
@@ -65,6 +72,15 @@ namespace Aimmy2.AILogic
                             sessionOptions.AppendExecutionProvider_Tensorrt(tensorrtOptions);
                             break;
                         case "CUDA":
+                            var cudaProviderOptions = new OrtCUDAProviderOptions();
+
+                            cudaProviderOptions.UpdateOptions(new Dictionary<string, string>
+                        {
+                            { "device_id", "0" },
+                            { "arena_extend_strategy", "kNextPowerOfTwo" },
+                            { "do_copy_in_default_stream", "1" },
+
+                        });
                             Log(LogLevel.Info, "Loading model with CUDA execution provider.", false);
                             sessionOptions.AppendExecutionProvider_CUDA();
                             break;
@@ -83,6 +99,8 @@ namespace Aimmy2.AILogic
                 onnxModel = await Task.Run(() => new InferenceSession(modelPath, sessionOptions), cts.Token);
                 //_onnxModel = new InferenceSession(modelPath, sessionOptions);
                 outputNames = new(onnxModel.OutputMetadata.Keys);
+                inputNames = onnxModel.InputMetadata.Keys.ToList();
+                inputName = inputNames.FirstOrDefault(); // pick the first one, safe default
 
                 Log(LogLevel.Info, $"Model loaded successfully: {modelPath}");
                 // Validate the onnx model output shape (ensure model is OnnxV8)
@@ -148,8 +166,7 @@ namespace Aimmy2.AILogic
             //return Task.CompletedTask;
         }
 
-       
-
+        #region model shape validation and class loading
         public bool ValidateOnnxShape(int IMAGE_SIZE)
         {
             if (onnxModel != null)
@@ -203,7 +220,7 @@ namespace Aimmy2.AILogic
                     ModelFixedSize = fixedInputSize;
 
                     // List of supported sizes
-                    var supportedSizes = new[] { "640", "512", "416", "320", "256", "160" };
+                    var supportedSizes = new[] { "640", "512", "416", "320", "256", "160" }; //isnt it 128?
                     var fixedSizeStr = fixedInputSize.ToString();
 
                     if (fixedInputSize != IMAGE_SIZE && supportedSizes.Contains(fixedSizeStr))
@@ -302,7 +319,7 @@ namespace Aimmy2.AILogic
                 Log(LogLevel.Error, $"Error loading classes: {ex.Message}", true);
             }
         }
-
+#endregion
         public void Dispose()
         {
             try
