@@ -25,41 +25,51 @@ namespace InputLogic
             return new Point(x, y);
         }
 
+
         internal static Point Exponential(Point start, Point end, double t, double exponent = 2.0)
         {
-            double x = start.X + (end.X - start.X) * Math.Pow(t, exponent);
-            double y = start.Y + (end.Y - start.Y) * Math.Pow(t, exponent);
-            return new Point((int)x, (int)y);
+            double factor = Math.Pow(t, exponent);
+            double x = start.X + (end.X - start.X) * factor;
+            double y = start.Y + (end.Y - start.Y) * factor;
+            return new Point((int) x, (int) y);
         }
 
         internal static Point Adaptive(Point start, Point end, double t, double threshold = 100.0)
         {
-            double distance = Math.Sqrt(Math.Pow(end.X - start.X, 2) + Math.Pow(end.Y - start.Y, 2));
-            if (distance < threshold)
+            int dx = end.X - start.X;
+            int dy = end.Y - start.Y;
+            double distanceSq = dx * dx + dy * dy;
+
+            //double distance = Math.Sqrt(Math.Pow(end.X - start.X, 2) + Math.Pow(end.Y - start.Y, 2));
+            if (distanceSq < threshold * threshold)
             {
                 return Lerp(start, end, t);
             }
             else
             {
-                Point control1 = new Point(start.X + (end.X - start.X) / 3, start.Y + (end.Y - start.Y) / 3);
-                Point control2 = new Point(start.X + 2 * (end.X - start.X) / 3, start.Y + 2 * (end.Y - start.Y) / 3);
+                Point control1 = new Point(start.X + dx / 3, start.Y + dy / 3);
+                Point control2 = new Point(start.X + 2 * dx / 3, start.Y + 2 * dy / 3);
+
                 return CubicBezier(start, end, control1, control2, t);
             }
         }
 
         internal static Point PerlinNoise(Point start, Point end, double t, double amplitude = 10.0, double frequency = 0.1)
         {
-            double baseX = start.X + (end.X - start.X) * t;
-            double baseY = start.Y + (end.Y - start.Y) * t;
+            double dx = end.X - start.X;
+            double dy = end.Y - start.Y;
+
+            double baseX = start.X + dx * t;
+            double baseY = start.Y + dy * t;
 
             double noiseX = Noise(t * frequency, 0) * amplitude;
             double noiseY = Noise(t * frequency, 100) * amplitude;
 
-            double perpX = -(end.Y - start.Y);
-            double perpY = end.X - start.X;
+            double perpX = -dy;
+            double perpY = dx;
             double perpLength = Math.Sqrt(perpX * perpX + perpY * perpY);
 
-            if (perpLength > 0)
+            if (perpLength > 1e-6)
             {
                 perpX /= perpLength;
                 perpY /= perpLength;
@@ -71,15 +81,9 @@ namespace InputLogic
             return new Point((int)finalX, (int)finalY);
         }
 
-        private static double Fade(double t)
-        {
-            return t * t * t * (t * (t * 6 - 15) + 10);
-        }
+        private static double Fade(double t) => t * t * t * (t * (t * 6 - 15) + 10);
 
-        private static double Lerp(double a, double b, double t)
-        {
-            return a + t * (b - a);
-        }
+        private static double Lerp(double a, double b, double t) => a + t * (b - a);
 
         private static double Grad(int hash, double x, double y)
         {

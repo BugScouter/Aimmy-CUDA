@@ -15,7 +15,7 @@ namespace InputLogic
         private static readonly double ScreenHeight = WinAPICaller.ScreenHeight;
 
         private static DateTime LastClickTime = DateTime.MinValue;
-        private static int LastAntiRecoilClickTime = 0;
+        private static int LastAntiRecoilClickTick = Environment.TickCount; 
         private static bool isSpraying = false;
 
         private const uint MOUSEEVENTF_LEFTDOWN = 0x0002;
@@ -140,9 +140,12 @@ namespace InputLogic
             }
         }
         #endregion
+
         public static void DoAntiRecoil()
         {
-            int timeSinceLastClick = Math.Abs(DateTime.UtcNow.Millisecond - LastAntiRecoilClickTime);
+            int now = Environment.TickCount;
+            int timeSinceLastClick = now - LastAntiRecoilClickTick;
+
 
             if (timeSinceLastClick < Dictionary.AntiRecoilSettings["Fire Rate"])
             {
@@ -175,7 +178,7 @@ namespace InputLogic
                     break;
             }
 
-            LastAntiRecoilClickTime = DateTime.UtcNow.Millisecond;
+            LastAntiRecoilClickTick = now;
         }
 
         public static void MoveCrosshair(int detectedX, int detectedY)

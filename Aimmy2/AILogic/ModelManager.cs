@@ -33,8 +33,6 @@ namespace Aimmy2.AILogic
 
         public bool isModelLoaded => onnxModel != null && outputNames != null && outputNames.Count > 0;
 
-
-
         public async Task LoadModelAsync(string modelPath, int IMAGE_SIZE, bool failure = false) // default value for failure is false, obviously
         {
             try
