@@ -1,6 +1,7 @@
 ﻿using Aimmy2.AILogic;
 using Aimmy2.Class;
 using Aimmy2.Other;
+using Aimmy2.Visuality;
 using Class;
 using System.Collections.ObjectModel;
 using System.IO;
@@ -16,6 +17,8 @@ namespace Other
 
         private ListBox ModelListBox;
         private Label SelectedModelNotifier;
+        private ObservableCollection<ModelItem> _modelItems;
+
 
         private ListBox ConfigListBox;
         private Label SelectedConfigNotifier;
@@ -39,13 +42,15 @@ namespace Other
             ConfigListBox.SelectionChanged += ConfigListBox_SelectionChanged;
 
             ModelListBox.AllowDrop = true;
-            ModelListBox.DragOver += ModelListBox_DragOver; 
+            ModelListBox.DragOver += ModelListBox_DragOver;
             ModelListBox.Drop += ModelListBox_DragDrop;
 
             ConfigListBox.AllowDrop = true;
             ConfigListBox.DragOver += ConfigListBox_DragDrop;
             ConfigListBox.Drop += ConfigListBox_DragDrop;
 
+            _modelItems = new ObservableCollection<ModelItem>();
+            ModelListBox.ItemsSource = _modelItems;
 
             CheckForRequiredFolders();
             InitializeFileWatchers();
@@ -80,17 +85,22 @@ namespace Other
 
         private async void ModelListBox_SelectionChanged(object sender, SelectionChangedEventArgs e)
         {
-            if (ModelListBox.SelectedItem == null) return;
+            if (ModelListBox.SelectedItem is not ModelItem m) return;
 
-            string selectedModel = ModelListBox.SelectedItem.ToString()!;
+            var selectedModel = m.Name!;
 
             string modelPath = Path.Combine("bin/models", selectedModel);
 
             // Check if the model is already selected or currently loading
             if (Dictionary.lastLoadedModel == selectedModel || CurrentlyLoadingModel) return;
 
+
             CurrentlyLoadingModel = true;
             ModelListBox.IsEnabled = false;
+
+            var model = _modelItems.FirstOrDefault(item => item.Name == selectedModel) ?? throw new ArgumentException($"Model '{selectedModel}' is not available in the current model list", nameof(selectedModel));
+
+            model.IsLoading = true;
 
             Dictionary.lastLoadedModel = selectedModel;
 
@@ -98,6 +108,7 @@ namespace Other
             // Store original values and disable them temporarily
             var toggleKeys = new[] { "Aim Assist", "Constant AI Tracking", "Auto Trigger", "Show Detected Player", "Show AI Confidence", "Show Tracers" };
             var originalToggleStates = toggleKeys.ToDictionary(key => key, key => Dictionary.toggleState[key]);
+
             try
             {
                 foreach (var key in toggleKeys)
@@ -112,14 +123,18 @@ namespace Other
                 // Reload AIManager with new model
                 AIManager?.Dispose();
                 AIManager = new AIManager(modelPath);
+                
                 bool isTensorRT = Dictionary.dropdownState["Execution Provider"] == "TensorRT";
+
                 if (isTensorRT)
                 {
-                        while (CurrentlyLoadingModel)
-                        {
-                        await Task.Delay(50); 
-                        }
+                    while (CurrentlyLoadingModel)
+                    {
+                        await Task.Delay(50);
+                    }
                 }
+
+                model.IsLoading = false;
 
                 string content = "Loaded Model: " + selectedModel;
                 ModelListBox.IsEnabled = true;
@@ -255,18 +270,24 @@ namespace Other
             {
                 Application.Current.Dispatcher.Invoke(() =>
                 {
+                    _modelItems.Clear();
                     string[] onnxFiles = Directory.GetFiles("bin/models", "*.onnx");
-                    ModelListBox.Items.Clear();
+                    //ModelListBox.Items.Clear();
 
                     foreach (string filePath in onnxFiles)
                     {
-                        ModelListBox.Items.Add(Path.GetFileName(filePath));
+                        _modelItems.Add(new ModelItem { Name = Path.GetFileName(filePath), IsLoading = false });
+
+                        //ModelListBox.Items.Add(Path.GetFileName(filePath));
                     }
 
                     if (ModelListBox.Items.Count > 0)
                     {
                         string? lastLoadedModel = Dictionary.lastLoadedModel;
-                        if (lastLoadedModel != "N/A" && !ModelListBox.Items.Contains(lastLoadedModel)) { ModelListBox.SelectedItem = lastLoadedModel; }
+                        if (lastLoadedModel != "N/A" && !ModelListBox.Items.Contains(lastLoadedModel))
+                        {
+                            ModelListBox.SelectedItem = lastLoadedModel;
+                        }
                         SelectedModelNotifier.Content = $"Loaded Model: {lastLoadedModel}";
                     }
                 });
