@@ -237,7 +237,7 @@ namespace Aimmy2.AILogic
                 }
                 catch (Exception ex)
                 {
-                    Log(LogLevel.Error, $"Error starting the model via DirectML: {ex.Message}\n\nFalling back to CPU, performance may be poor.", true);
+                    Log(LogLevel.Error, $"Error starting the model via CUDA/TensorRT: {ex.Message}\n\nFalling back to CPU, performance may be poor.", true);
 
                     try
                     {
@@ -324,7 +324,7 @@ namespace Aimmy2.AILogic
                         _modelOutputElementType = outMeta.ElementDataType;
                     }
 
-                    Log(LogLevel.Info, $"Model Input element type: {_modelInputElementType}; Output element type: {_modelOutputElementType}");
+                    //Log(LogLevel.Info, $"Model Input element type: {_modelInputElementType}; Output element type: {_modelOutputElementType}");
 
                     _ioBinding = _modelManager.onnxModel.CreateIoBinding();
                     var memoryInfo = OrtMemoryInfo.DefaultInstance; // let ort handle that or whatever
@@ -348,7 +348,7 @@ namespace Aimmy2.AILogic
                             _inputOrtValue = OrtValue.CreateTensorValueFromMemory<float>(
                                 memoryInfo, _reusableInputArray, inputShape);
                             _ioBinding.BindInput(_modelManager.inputName ?? "images", _inputOrtValue);
-                            Log(LogLevel.Info, "IOBinding: bound float input");
+                           // Log(LogLevel.Info, "IOBinding: bound float input");
                             break;
 
                         case TensorElementType.Float16:
@@ -359,7 +359,7 @@ namespace Aimmy2.AILogic
                             _inputOrtValue = OrtValue.CreateTensorValueFromMemory<ushort>(
                                 memoryInfo, _inputU16Buffer, inputShape);
                             _ioBinding.BindInput(_modelManager.inputName ?? "images", _inputOrtValue);
-                            Log(LogLevel.Info, "IOBinding: bound float16 input (ushort buffer)");
+                          //  Log(LogLevel.Info, "IOBinding: bound float16 input (ushort buffer)");
                             break;
 
                         default:
@@ -384,7 +384,7 @@ namespace Aimmy2.AILogic
                             _outputOrtValue = OrtValue.CreateTensorValueFromMemory<float>(
                                 memoryInfo, _outputFloatBuffer, outputShape);
                             _ioBinding.BindOutput(_modelManager.outputNames[0], _outputOrtValue);
-                            Log(LogLevel.Info, "IOBinding: bound float output");
+                         //   Log(LogLevel.Info, "IOBinding: bound float output");
                             break;
 
                         case TensorElementType.Float16:
@@ -395,7 +395,7 @@ namespace Aimmy2.AILogic
                             _outputOrtValue = OrtValue.CreateTensorValueFromMemory<ushort>(
                                 memoryInfo, _outputU16Buffer, outputShape);
                             _ioBinding.BindOutput(_modelManager.outputNames[0], _outputOrtValue);
-                            Log(LogLevel.Info, "IOBinding: bound float16 output (ushort buffer)");
+                      //      Log(LogLevel.Info, "IOBinding: bound float16 output (ushort buffer)");
                             break;
 
                         default:
