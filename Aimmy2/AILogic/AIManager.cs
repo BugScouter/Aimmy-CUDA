@@ -223,7 +223,7 @@ namespace Aimmy2.AILogic
             {
                 try
                 {
-                    await _modelManager.LoadModelAsync(modelPath, IMAGE_SIZE).ConfigureAwait(false);
+                    await _modelManager.LoadModelAsync(modelPath, IMAGE_SIZE);
 
                     if (_modelManager.isModelLoaded)
                     {
@@ -241,7 +241,7 @@ namespace Aimmy2.AILogic
 
                     try
                     {
-                        await _modelManager.LoadModelAsync(modelPath, IMAGE_SIZE, failure: true).ConfigureAwait(false);
+                        await _modelManager.LoadModelAsync(modelPath, IMAGE_SIZE, failure: true);
                         if (_modelManager.isModelLoaded)
                         {
                             StartAILoop(_modelManager.onnxModel);
@@ -275,13 +275,6 @@ namespace Aimmy2.AILogic
 
             lock (_ioBindingLock)
             {
-                if (_ioBindingInitialized &&
-                _reusableTensor != null &&
-                _reusableTensor.Dimensions[2] == imageSize)
-                {
-                    return;
-                } // double check during lock
-
                 if (_modelManager.onnxModel == null)
                 {
                     return;
@@ -513,7 +506,7 @@ namespace Aimmy2.AILogic
 
                             using (Benchmark("AutoTrigger"))
                             {
-                                await AutoTrigger().ConfigureAwait(false);
+                                await AutoTrigger();
                             }
 
                             using (Benchmark("CalculateCoordinates"))
@@ -532,13 +525,13 @@ namespace Aimmy2.AILogic
                         else
                         {
                             // Processing so we are at the ready but not holding right/click.
-                            await Task.Delay(1, ct).ConfigureAwait(false);
+                            await Task.Delay(1, ct);
                         }
                     }
                     else
                     {
                         // No work to do—sleep briefly to free up CPU
-                        await Task.Delay(1, ct).ConfigureAwait(false);
+                        await Task.Delay(1, ct);
                     }
                 }
 
@@ -566,7 +559,7 @@ namespace Aimmy2.AILogic
 
             if (Dictionary.toggleState["Spray Mode"])
             {
-                await MouseManager.DoTriggerClick(LastDetectionBox).ConfigureAwait(false);
+                await MouseManager.DoTriggerClick(LastDetectionBox);
                 return;
             }
 
@@ -582,12 +575,12 @@ namespace Aimmy2.AILogic
 
                 if (LastDetectionBox.Contains(mousePos.X, mousePos.Y))
                 {
-                    await MouseManager.DoTriggerClick(LastDetectionBox).ConfigureAwait(false);
+                    await MouseManager.DoTriggerClick(LastDetectionBox);
                 }
             }
             else
             {
-                await MouseManager.DoTriggerClick().ConfigureAwait(false);
+                await MouseManager.DoTriggerClick();
             }
 
             if (!Dictionary.toggleState["Aim Assist"] || !Dictionary.toggleState["Show Detected Player"]) return;
@@ -775,175 +768,180 @@ namespace Aimmy2.AILogic
 
             Rectangle detectionBox = new(targetX - IMAGE_SIZE / 2, targetY - IMAGE_SIZE / 2, IMAGE_SIZE, IMAGE_SIZE); // Detection box dynamic size
 
+            Bitmap? frame;
+
             using (Benchmark("ScreenGrab"))
-            using (var frame = _captureManager.ScreenGrab(detectionBox))
             {
+                frame = _captureManager.ScreenGrab(detectionBox);
+            }
 
-                if (frame == null) return null;
+            if (frame == null) return null;
 
-                float[] inputArray;
-                using (Benchmark("BitmapToFloatArray"))
+            float[] inputArray;
+            using (Benchmark("BitmapToFloatArray"))
+            {
+                int requiredLength = 3 * IMAGE_SIZE * IMAGE_SIZE;
+
+                if (_reusableInputArray == null || _reusableInputArray.Length != requiredLength)
                 {
-                    int requiredLength = 3 * IMAGE_SIZE * IMAGE_SIZE;
-
-                    if (_reusableInputArray == null || _reusableInputArray.Length != requiredLength)
-                    {
-                        _reusableInputArray = new float[requiredLength];
-                        _reusableTensor = null;
-                        _reusableInputs = null;
-                    }
-                    inputArray = _reusableInputArray;
-
-                    BitmapToFloatArrayInPlace(frame, inputArray, IMAGE_SIZE);
+                    _reusableInputArray = new float[requiredLength];
+                    _reusableTensor = null;
+                    _reusableInputs = null;
                 }
+                inputArray = _reusableInputArray;
 
-                if (_modelManager.onnxModel == null)
+                BitmapToFloatArrayInPlace(frame, inputArray, IMAGE_SIZE);
+            }
+
+            if (_modelManager.onnxModel == null)
+            {
+                frame.Dispose();
+                return null; // Model not loaded, exit early
+            }
+
+            if (!_ioBindingInitialized ||
+                _reusableTensor == null ||
+                _reusableTensor.Dimensions[2] != IMAGE_SIZE)
+            {
+                using (Benchmark("IOBindingInitialization"))
                 {
-                    frame.Dispose();
-                    return null; // Model not loaded, exit early
+                    InitializeIOBinding(IMAGE_SIZE);
                 }
+            }
 
-                if (!_ioBindingInitialized ||
-                    _reusableTensor == null ||
-                    _reusableTensor.Dimensions[2] != IMAGE_SIZE)
+            Tensor<float>? outputTensor = null;
+            using (Benchmark("ModelInference"))
+            {
+                try
                 {
-                    using (Benchmark("IOBindingInitialization"))
+                    if (_ioBindingInitialized && _inputOrtValue != null && _outputOrtValue != null)
                     {
-                        InitializeIOBinding(IMAGE_SIZE);
-                    }
-                }
-
-                Tensor<float>? outputTensor = null;
-                using (Benchmark("ModelInference"))
-                {
-                    try
-                    {
-                        if (_ioBindingInitialized && _inputOrtValue != null && _outputOrtValue != null)
+                        // convert float into half precision bc of .net
+                        if (_modelInputElementType == TensorElementType.Float16)
                         {
-                            // convert float into half precision bc of .net
-                            if (_modelInputElementType == TensorElementType.Float16)
+                            int len = _reusableInputArray!.Length;
+                            var inputU16 = _inputU16Buffer!;
+                            for (int i = 0; i < len; i++)
                             {
-                                int len = _reusableInputArray!.Length;
-                                var inputU16 = _inputU16Buffer!;
-                                for (int i = 0; i < len; i++)
-                                {
-                                    // clamp to reasonable range first (some models require [0,1])
-                                    float v = _reusableInputArray[i];
-                                    inputU16[i] = FloatToHalfBits(v);
-                                }
+                                // clamp to reasonable range first (some models require [0,1])
+                                float v = _reusableInputArray[i];
+                                inputU16[i] = FloatToHalfBits(v);
                             }
+                        }
 
-                            //run inference as per IO Binding
-                            _modelManager.onnxModel.RunWithBinding(_modelManager.modelOptions, _ioBinding);
+                        //run inference as per IO Binding
+                        _modelManager.onnxModel.RunWithBinding(_modelManager.modelOptions, _ioBinding);
 
-                            // im too lazy to turn this into a switch statement
-                            if (_modelOutputElementType == TensorElementType.Float)
-                            {
-                                // get model output
-                                outputTensor = new DenseTensor<float>(_outputFloatBuffer, new int[] { 1, _modelManager.NUM_CLASSES + 4, _modelManager.NUM_DETECTIONS });
-                            }
-                            else if (_modelOutputElementType == TensorElementType.Float16) // usually f16
-                            {
-                                // convert ushort half-bits -> float[] into a temp array
-                                var outU16 = _outputU16Buffer!;
-                                var outFloat = new float[outU16.Length];
-                                for (int i = 0; i < outU16.Length; i++)
-                                    outFloat[i] = HalfBitsToFloat(outU16[i]);
+                        // im too lazy to turn this into a switch statement
+                        if (_modelOutputElementType == TensorElementType.Float)
+                        {
+                            // get model output
+                            outputTensor = new DenseTensor<float>(_outputFloatBuffer, new int[] { 1, _modelManager.NUM_CLASSES + 4, _modelManager.NUM_DETECTIONS });
+                        }
+                        else if (_modelOutputElementType == TensorElementType.Float16) // usually f16
+                        {
+                            // convert ushort half-bits -> float[] into a temp array
+                            var outU16 = _outputU16Buffer!;
+                            var outFloat = new float[outU16.Length];
+                            for (int i = 0; i < outU16.Length; i++)
+                                outFloat[i] = HalfBitsToFloat(outU16[i]);
 
-                                outputTensor = new DenseTensor<float>(
-                                    outFloat,
-                                    new int[] { 1, _modelManager.NUM_CLASSES + 4, _modelManager.NUM_DETECTIONS }
-                                );
-                            }
-                            else
-                            { // yikes
-                                throw new NotSupportedException($"Unsupported model output element type: {_modelOutputElementType}");
-                            }
+                            outputTensor = new DenseTensor<float>(
+                                outFloat,
+                                new int[] { 1, _modelManager.NUM_CLASSES + 4, _modelManager.NUM_DETECTIONS }
+                            );
+                        }
+                        else
+                        { // yikes
+                            throw new NotSupportedException($"Unsupported model output element type: {_modelOutputElementType}");
+                        }
+                    }
+                    else
+                    {
+                        // run it without i/o binding
+                        if (_reusableTensor == null || _reusableTensor.Dimensions[2] != IMAGE_SIZE)
+                        {
+                            _reusableTensor = new DenseTensor<float>(_reusableInputArray, new int[] { 1, 3, IMAGE_SIZE, IMAGE_SIZE });
+
+                            if (_reusableInputs == null)
+                                _reusableInputs = new List<NamedOnnxValue>(1);
+
+                            _reusableInputs.Clear();
+                            _reusableInputs.Add(NamedOnnxValue.CreateFromTensor(_modelManager.inputName ?? "images", _reusableTensor));
                         }
                         else
                         {
-                            // run it without i/o binding
-                            if (_reusableTensor == null || _reusableTensor.Dimensions[2] != IMAGE_SIZE)
-                            {
-                                _reusableTensor = new DenseTensor<float>(_reusableInputArray, new int[] { 1, 3, IMAGE_SIZE, IMAGE_SIZE });
-
-                                if (_reusableInputs == null)
-                                    _reusableInputs = new List<NamedOnnxValue>(1);
-
-                                _reusableInputs.Clear();
-                                _reusableInputs.Add(NamedOnnxValue.CreateFromTensor(_modelManager.inputName ?? "images", _reusableTensor));
-                            }
-                            else
-                            {
-                                _reusableInputArray.AsSpan().CopyTo(_reusableTensor.Buffer.Span);
-                            }
-
-                            using var results = _modelManager.onnxModel.Run(_reusableInputs, _modelManager.outputNames, _modelManager.modelOptions);
-                            outputTensor = results[0].AsTensor<float>();
+                            _reusableInputArray.AsSpan().CopyTo(_reusableTensor.Buffer.Span);
                         }
-                    }
-                    catch (Exception ex)
-                    {
-                        Log(LogLevel.Error, $"Inference error: {ex.Message}");
-                        _ioBindingInitialized = false; // Reset IO Binding on error
+
+                        using var results = _modelManager.onnxModel.Run(_reusableInputs, _modelManager.outputNames, _modelManager.modelOptions);
+                        outputTensor = results[0].AsTensor<float>();
                     }
                 }
-
-                if (outputTensor == null)
+                catch (Exception ex)
                 {
-                    Log(LogLevel.Error, "Model inference returned null output tensor.", true, 2000);
-                    SaveFrame(frame);
-                    return null;
+                    Log(LogLevel.Error, $"Inference error: {ex.Message}");
+                    _ioBindingInitialized = false; // Reset IO Binding on error
                 }
-
-                // Calculate the FOV boundaries
-                float FovSize = (float)Dictionary.sliderSettings["FOV Size"];
-                float fovMinX = (IMAGE_SIZE - FovSize) / 2.0f;
-                float fovMaxX = (IMAGE_SIZE + FovSize) / 2.0f;
-                float fovMinY = (IMAGE_SIZE - FovSize) / 2.0f;
-                float fovMaxY = (IMAGE_SIZE + FovSize) / 2.0f;
-
-                //we replaced kdtree
-                //List<double[]> KDpoints;
-                List<Prediction> KDPredictions;
-                using (Benchmark("PrepareKDTreeData")) // not really kd tree data anymore
-                {
-                    KDPredictions = PrepareKDTreeData(outputTensor, detectionBox, fovMinX, fovMaxX, fovMinY, fovMaxY);
-                }
-
-                if (KDPredictions.Count == 0)
-                {
-                    SaveFrame(frame);
-                    return null;
-                }
-
-                // i removed kd tree.
-                Prediction? bestCandidate = null;
-                double bestDistSq = double.MaxValue;
-                double center = IMAGE_SIZE / 2.0;
-
-                using (Benchmark("LinearSearch"))
-                {
-                    foreach (var p in KDPredictions)
-                    {
-                        var dx = p.CenterXTranslated * IMAGE_SIZE - center; // or use x_center from KDpoints
-                        var dy = p.CenterYTranslated * IMAGE_SIZE - center;
-                        double d2 = dx * dx + dy * dy; // dx^2 + dy^2
-
-                        if (d2 < bestDistSq) { bestDistSq = d2; bestCandidate = p; }
-                    }
-                }
-
-                Prediction? finalTarget = HandleStickyAim(bestCandidate, KDPredictions);
-                if (finalTarget != null)
-                {
-                    UpdateDetectionBox(finalTarget, detectionBox);
-                    SaveFrame(frame, finalTarget);
-                    return finalTarget;
-                }
-
-                return null; // frame should auto dispose ... wont be benchmarked maybe
             }
+
+            if (outputTensor == null)
+            {
+                Log(LogLevel.Error, "Model inference returned null output tensor.", true, 2000);
+                SaveFrame(frame);
+                return null;
+            }
+
+            // Calculate the FOV boundaries
+            float FovSize = (float)Dictionary.sliderSettings["FOV Size"];
+            float fovMinX = (IMAGE_SIZE - FovSize) / 2.0f;
+            float fovMaxX = (IMAGE_SIZE + FovSize) / 2.0f;
+            float fovMinY = (IMAGE_SIZE - FovSize) / 2.0f;
+            float fovMaxY = (IMAGE_SIZE + FovSize) / 2.0f;
+
+            //we replaced kdtree
+            //List<double[]> KDpoints;
+            List<Prediction> KDPredictions;
+            using (Benchmark("PrepareKDTreeData")) // not really kd tree data anymore
+            {
+                KDPredictions = PrepareKDTreeData(outputTensor, detectionBox, fovMinX, fovMaxX, fovMinY, fovMaxY);
+            }
+
+            if (KDPredictions.Count == 0)
+            {
+                SaveFrame(frame);
+                frame.Dispose();
+                return null;
+            }
+
+            // i removed kd tree.
+            Prediction? bestCandidate = null;
+            double bestDistSq = double.MaxValue;
+            double center = IMAGE_SIZE / 2.0;
+
+            using (Benchmark("LinearSearch"))
+            {
+                foreach (var p in KDPredictions)
+                {
+                    var dx = p.CenterXTranslated * IMAGE_SIZE - center; // or use x_center from KDpoints
+                    var dy = p.CenterYTranslated * IMAGE_SIZE - center;
+                    double d2 = dx * dx + dy * dy; // dx^2 + dy^2
+
+                    if (d2 < bestDistSq) { bestDistSq = d2; bestCandidate = p; }
+                }
+            }
+
+            Prediction? finalTarget = HandleStickyAim(bestCandidate, KDPredictions);
+            if (finalTarget != null)
+            {
+                UpdateDetectionBox(finalTarget, detectionBox);
+                SaveFrame(frame, finalTarget);
+                frame.Dispose();
+                return finalTarget;
+            }
+
+            frame.Dispose();
+            return null;
         }
 
         // sticky aim needs to be refined
@@ -1028,6 +1026,7 @@ namespace Aimmy2.AILogic
                     if (kv.Value == selectedClass) { selectedClassId = kv.Key; break; }
                 }
             }
+
 
             //var KDpoints = new List<double[]>(_modelManager.NUM_DETECTIONS); // Pre-allocate with estimated capacity
             //var KDpredictions = new List<Prediction>(numDetections);

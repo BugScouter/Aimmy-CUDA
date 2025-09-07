@@ -94,7 +94,7 @@ namespace Aimmy2.AILogic
                 }
 
                 var cts = new CancellationTokenSource(TimeSpan.FromMinutes(2));
-                onnxModel = await Task.Run(() => new InferenceSession(modelPath, sessionOptions), cts.Token).ConfigureAwait(false);
+                onnxModel = await Task.Run(() => new InferenceSession(modelPath, sessionOptions), cts.Token);
                 //_onnxModel = new InferenceSession(modelPath, sessionOptions);
                 outputNames = new(onnxModel.OutputMetadata.Keys);
                 inputNames = onnxModel.InputMetadata.Keys.ToList();

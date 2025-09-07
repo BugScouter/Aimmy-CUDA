@@ -86,7 +86,7 @@ namespace Aimmy2
             try
             {
                 SaveDictionary.EnsureDirectoriesExist();
-
+                
                 RequirementsManager.CheckForRequirements();
 
                 InitializeMenus();
@@ -94,13 +94,13 @@ namespace Aimmy2
 
                 // Load configurations BEFORE loading any menus
                 // This ensures minimize states are loaded from file before menu initialization
-                await LoadConfigurationsAsync().ConfigureAwait(false);
+                await LoadConfigurationsAsync();
 
                 // Now load the initial menu - it will use the loaded minimize states
                 LoadInitialMenu();
 
                 // Continue with the rest of initialization
-                await InitializeApplicationAsync().ConfigureAwait(false);
+                await InitializeApplicationAsync();
                 UpdateAboutSpecs();
                 ApplyThemeGradients();
                 ThemeManager.LoadMediaSettings();
@@ -152,7 +152,7 @@ namespace Aimmy2
             await Task.Run(() =>
             {
                 arManager.HoldDownLoad();
-            }).ConfigureAwait(false);
+            });
 
             SetupKeybindings();
             ConfigurePropertyChangers();
@@ -165,18 +165,9 @@ namespace Aimmy2
 
         private void OnDisplayChanged(object? sender, DisplayChangedEventArgs e)
         {
-            Dispatcher.BeginInvoke(new Action(() =>
-            {
-                try
-                {
-                    // Force update all windows to new display
-                    DisplayManager.ForceUpdateWindows();
-                }
-                catch (Exception ex)
-                {
-                    LogManager.Log(LogManager.LogLevel.Error, $"Error handling display change: {ex.Message}", true);
-                }
-            }), System.Windows.Threading.DispatcherPriority.Background);
+
+            // Force update all windows to new display
+            DisplayManager.ForceUpdateWindows();
         }
 
         private void CheckRunningFromTemp()
@@ -242,7 +233,7 @@ namespace Aimmy2
                 {
                     SaveDictionary.LoadJSON(dict, path);
                 }
-            }).ConfigureAwait(false);
+            });
 
             // Load these on UI thread since they might show notifications
             LoadConfig();
@@ -575,7 +566,7 @@ namespace Aimmy2
                     MenuHighlighter.Margin,
                     ((Button)sender).Margin);
 
-                await SwitchToMenu(newMenuName).ConfigureAwait(false);
+                await SwitchToMenu(newMenuName);
                 _currentMenu = newMenuName;
             }
             catch (Exception ex)
@@ -595,7 +586,7 @@ namespace Aimmy2
             if (_currentControl != null)
             {
                 Animator.FadeOut(_currentControl);
-                await Task.Delay(150).ConfigureAwait(false); // Fade between menu content
+                await Task.Delay(150); // Fade between menu content
             }
 
             LoadMenu(menuName);

@@ -107,7 +107,7 @@ namespace InputLogic
             var (mouseDown, mouseUp) = GetMouseActions();
 
             mouseDown.Invoke();
-            await Task.Delay(clickDelayMilliseconds).ConfigureAwait(false);
+            await Task.Delay(clickDelayMilliseconds);
             mouseUp.Invoke();
 
             LastClickTime = DateTime.UtcNow;

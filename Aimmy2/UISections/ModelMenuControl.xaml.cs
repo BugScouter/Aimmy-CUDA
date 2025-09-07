@@ -110,7 +110,7 @@ namespace Aimmy2.Controls
                     FileManager.RetrieveAndAddFiles("https://api.github.com/repos/Babyhamsta/Aimmy/contents/configs", "bin\\configs", availableConfigs)
                 };
 
-                await Task.WhenAll(tasks).ConfigureAwait(false);
+                await Task.WhenAll(tasks);
 
                 // Process results - just collect the data
                 var modelNames = availableModels.OrderBy(m => m).ToList();
@@ -127,7 +127,7 @@ namespace Aimmy2.Controls
             {
                 await Dispatcher.InvokeAsync(() =>
                 {
-                    LogManager.Log(LogManager.LogLevel.Error, $"Error loading store: {e.Message}", true);
+                    new NoticeBar($"Failed to load store: {e.Message}", 10000).Show();
 
                     // Show error in UI
                     ModelStoreScroller.Children.Clear();

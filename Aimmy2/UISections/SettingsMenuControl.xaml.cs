@@ -159,19 +159,19 @@ namespace Aimmy2.Controls
                     uiManager.DDI_LGHUB.Selected += async (s, e) =>
                     {
                         if (!new LGHubMain().Load())
-                            await ResetToMouseEvent().ConfigureAwait(false);
+                            await ResetToMouseEvent();
                     };
 
                     uiManager.DDI_RazerSynapse.Selected += async (s, e) =>
                     {
-                        if (!await RZMouse.Load().ConfigureAwait(false))
-                            await ResetToMouseEvent().ConfigureAwait(false);
+                        if (!await RZMouse.Load())
+                            await ResetToMouseEvent();
                     };
 
                     uiManager.DDI_ddxoft.Selected += async (s, e) =>
                     {
-                        if (!await DdxoftMain.Load().ConfigureAwait(false))
-                            await ResetToMouseEvent().ConfigureAwait(false);
+                        if (!await DdxoftMain.Load())
+                            await ResetToMouseEvent();
                     };
                 })
                 .AddDropdown("Screen Capture Method", d =>
@@ -244,7 +244,7 @@ namespace Aimmy2.Controls
                             if (FileManager.AIManager != null)
                             {
                                 FileManager.AIManager.RequestSizeChange(int.Parse(newSize));
-                                await Task.Delay(100).ConfigureAwait(false); // Give AI loop time to pause
+                                await Task.Delay(100); // Give AI loop time to pause
                             }
 
                             // Dispose the current AIManager
@@ -416,7 +416,7 @@ namespace Aimmy2.Controls
         }
         private async Task ResetToMouseEvent()
         {
-            await Task.Delay(500).ConfigureAwait(false);
+            await Task.Delay(500);
             _mainWindow!.uiManager.D_MouseMovementMethod!.DropdownBox.SelectedIndex = 0;
         }
 

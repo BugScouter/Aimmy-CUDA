@@ -1,7 +1,7 @@
 ﻿using System.Drawing;
 using System.Drawing.Imaging;
-using System.Numerics;
 using System.Runtime.CompilerServices;
+using System.Numerics;
 
 namespace Aimmy2.AILogic
 {
@@ -58,22 +58,18 @@ namespace Aimmy2.AILogic
 
         // this new function reduces gc pressure as i stopped using array.copy
         // REFERENCE: https://www.codeproject.com/Articles/617613/Fast-Pixel-Operations-in-NET-With-and-Without-unsa
-        public static unsafe void BitmapToFloatArrayInPlace(Bitmap image, float[] result, int imageSize)
+        public static unsafe void BitmapToFloatArrayInPlace(Bitmap image, float[] result, int IMAGE_SIZE)
         {
             if (image == null) throw new ArgumentNullException(nameof(image));
             if (result == null) throw new ArgumentNullException(nameof(result));
 
-            //assumes square so dont feed it non-square images
-            int width = imageSize;
-            int height = imageSize;
+            int width = IMAGE_SIZE;
+            int height = IMAGE_SIZE;
             int totalPixels = width * height;
 
             // check if it has the right size
             if (result.Length != 3 * totalPixels)
                 throw new ArgumentException($"result must be length {3 * totalPixels}", nameof(result));
-
-            if (image.Width != width || image.Height != height)
-                throw new ArgumentException($"Bitmap size ({image.Width}x{image.Height}) does not match expected size {width}x{height}.");
 
             //const float multiplier = 1f / 255f; kept for reference
             var rect = new Rectangle(0, 0, width, height);
@@ -89,12 +85,10 @@ namespace Aimmy2.AILogic
                 // 32gbpp format is hardcoded but 24bpp is just 3 bytes per pixel
                 const int bytesPerPixel = 4;
                 const int pixelsPerIteration = 4; // process 4 pixels at a time
-
+                
                 int rOffset = 0; // Red channel starts at index 0
                 int gOffset = totalPixels; // Green channel starts after red
                 int bOffset = totalPixels * 2; // Blue channel starts after green
-
-                bool useSequential = width <= 320; // (<=320 sequential)              
 
                 // prevent gc from moving the array while we are using it
                 fixed (float* dest = result)
@@ -102,105 +96,63 @@ namespace Aimmy2.AILogic
                     float* rPtr = dest + rOffset; //pointers to the start of each channel
                     float* gPtr = dest + gOffset; //variables are arranged in RGB but its actually BGR.
                     float* bPtr = dest + bOffset;
-                    if (!useSequential)
+
+
+                    // TODO:
+                    // For common small IMAGE_SIZE (128/224/320) parallel would be slower ... so we will factor that in later.
+
+                    // process rows in parallel
+                    Parallel.For(0, height, (y) =>
                     {
+                        byte* row = basePtr + (long)y * stride;
+                        int rowStart = y * width;
+                        int x = 0;
 
-                        // process rows in parallel
-                        Parallel.For(0, height, (y) =>
+                        int widthLimit = width - pixelsPerIteration + 1;
+                        // optimize for 4 pixels at a time
+                        // to remove loop overhead and (cache (?))
+                        for (; x < widthLimit; x += pixelsPerIteration)
                         {
-                            byte* row = basePtr + (long)y * stride;
-                            int rowStart = y * width;
-                            int x = 0;
+                            int baseIdx = rowStart + x;
+                            byte* p = row + (x * bytesPerPixel);
 
-                            int widthLimit = width - pixelsPerIteration + 1;
-                            // optimize for 4 pixels at a time
-                            // to remove loop overhead and (cache (?))
-                            for (; x < widthLimit; x += pixelsPerIteration)
-                            {
-                                int baseIdx = rowStart + x;
-                                byte* p = row + (x * bytesPerPixel);
+                            // bgr(a) values
+                            // windows bitmap uses BGR order
 
-                                // bgr(a) values
-                                // windows bitmap uses BGR order
+                            // process 1st pixel / pixel 0 (16bytes)
+                            bPtr[baseIdx] = _byteToFloatLut[p[0]];
+                            gPtr[baseIdx] = _byteToFloatLut[p[1]];
+                            rPtr[baseIdx] = _byteToFloatLut[p[2]];
+                            //alpha is ignored
 
-                                // process 1st pixel / pixel 0 (16bytes)
-                                bPtr[baseIdx] = _byteToFloatLut[p[0]];
-                                gPtr[baseIdx] = _byteToFloatLut[p[1]];
-                                rPtr[baseIdx] = _byteToFloatLut[p[2]];
-                                //alpha is ignored
+                            // pixel 1
+                            bPtr[baseIdx + 1] = _byteToFloatLut[p[4]];
+                            gPtr[baseIdx + 1] = _byteToFloatLut[p[5]];
+                            rPtr[baseIdx + 1] = _byteToFloatLut[p[6]];
+                            // pixel 2
+                            bPtr[baseIdx + 2] = _byteToFloatLut[p[8]];
+                            gPtr[baseIdx + 2] = _byteToFloatLut[p[9]];
+                            rPtr[baseIdx + 2] = _byteToFloatLut[p[10]];
+                            // pixel 3
+                            bPtr[baseIdx + 3] = _byteToFloatLut[p[12]];
+                            gPtr[baseIdx + 3] = _byteToFloatLut[p[13]];
+                            rPtr[baseIdx + 3] = _byteToFloatLut[p[14]];
 
-                                // pixel 1
-                                bPtr[baseIdx + 1] = _byteToFloatLut[p[4]];
-                                gPtr[baseIdx + 1] = _byteToFloatLut[p[5]];
-                                rPtr[baseIdx + 1] = _byteToFloatLut[p[6]];
-                                // pixel 2
-                                bPtr[baseIdx + 2] = _byteToFloatLut[p[8]];
-                                gPtr[baseIdx + 2] = _byteToFloatLut[p[9]];
-                                rPtr[baseIdx + 2] = _byteToFloatLut[p[10]];
-                                // pixel 3
-                                bPtr[baseIdx + 3] = _byteToFloatLut[p[12]];
-                                gPtr[baseIdx + 3] = _byteToFloatLut[p[13]];
-                                rPtr[baseIdx + 3] = _byteToFloatLut[p[14]];
-
-                                p += 16; // move pointer 16 bytes forward (4 pixels * 4 bytes per pixel)
-                            }
-
-                            // handle the rest of the pixels when width is not divisible by 4
-                            for (; x < width; x++)
-                            {
-                                int idx = rowStart + x;
-                                byte* p = row + (x * bytesPerPixel);
-
-                                // process by BGR(a) value like before
-                                bPtr[idx] = _byteToFloatLut[p[0]];
-                                gPtr[idx] = _byteToFloatLut[p[1]];
-                                rPtr[idx] = _byteToFloatLut[p[2]];
-                            }
-                        });
-                    }
-                    else
-                    {
-                        //handle it sequentially for small images (<=320 width) (120, 320, idk)
-                        for (int y = 0; y < height; y++)
-                        {
-                            byte* row = basePtr + (long)y * stride;
-                            int rowStart = y * width;
-                            int x = 0;
-                            int widthLimit = width - pixelsPerIteration + 1;
-
-                            for (; x < widthLimit; x += pixelsPerIteration)
-                            {
-                                int baseIdx = rowStart + x;
-                                byte* p = row + (x * bytesPerPixel);
-
-                                bPtr[baseIdx] = _byteToFloatLut[p[0]];
-                                gPtr[baseIdx] = _byteToFloatLut[p[1]];
-                                rPtr[baseIdx] = _byteToFloatLut[p[2]];
-
-                                bPtr[baseIdx + 1] = _byteToFloatLut[p[4]];
-                                gPtr[baseIdx + 1] = _byteToFloatLut[p[5]];
-                                rPtr[baseIdx + 1] = _byteToFloatLut[p[6]];
-
-                                bPtr[baseIdx + 2] = _byteToFloatLut[p[8]];
-                                gPtr[baseIdx + 2] = _byteToFloatLut[p[9]];
-                                rPtr[baseIdx + 2] = _byteToFloatLut[p[10]];
-
-                                bPtr[baseIdx + 3] = _byteToFloatLut[p[12]];
-                                gPtr[baseIdx + 3] = _byteToFloatLut[p[13]];
-                                rPtr[baseIdx + 3] = _byteToFloatLut[p[14]];
-                            }
-
-                            // handle the rest of the pixels when width is not divisible by 4
-                            for (; x < width; x++)
-                            {
-                                int idx = rowStart + x;
-                                byte* p = row + (x * bytesPerPixel);
-                                bPtr[idx] = _byteToFloatLut[p[0]];
-                                gPtr[idx] = _byteToFloatLut[p[1]];
-                                rPtr[idx] = _byteToFloatLut[p[2]];
-                            }
+                            p += 16; // move pointer 16 bytes forward (4 pixels * 4 bytes per pixel)
                         }
-                    }
+
+                        // handle the rest of the pixels when width is not divisible by 4
+                        for (; x < width; x++)
+                        {
+                            int idx = rowStart + x;
+                            byte* p = row + (x * bytesPerPixel);
+
+                            // process by BGR(a) value like before
+                            bPtr[idx] = _byteToFloatLut[p[0]];
+                            gPtr[idx] = _byteToFloatLut[p[1]];
+                            rPtr[idx] = _byteToFloatLut[p[2]];
+                        }
+                    });
                 }
             }
             finally
@@ -217,7 +169,11 @@ namespace Aimmy2.AILogic
         // I would just like to say now, that python users are extremely lucky: https://onnxruntime.ai/docs/performance/model-optimizations/float16.html
 
 
-        // convert single-precision (32-bit) float to half-precision (16-bit) float stored in ushort
+        /// <summary>
+        /// convert single-precision (32-bit) float to half-precision (16-bit) float stored in ushort
+        /// </summary>
+        /// <param name="f"></param>
+        /// <returns></returns>
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
         public static ushort FloatToHalfBits(float f)
         {
@@ -258,7 +214,11 @@ namespace Aimmy2.AILogic
             return (ushort)(sign | (exp << 10) | mantissa); // store as 16 bit
         }
 
-        //  convert half-precision (16-bit) float stored in ushort to single-precision (32-bit) float
+        /// <summary>
+        ///  convert half-precision (16-bit) float stored in ushort to single-precision (32-bit) float
+        /// </summary>
+        /// <param name="h"></param>
+        /// <returns></returns>
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
         public static float HalfBitsToFloat(ushort h)
         {
