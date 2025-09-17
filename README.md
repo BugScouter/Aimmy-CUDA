@@ -20,6 +20,9 @@ Aimmy is a universal AI-Based Aim Alignment Mechanism developed by BabyHamsta, M
 ## What is TensorRT? 
 @mastere4 says, *"Pretty much an add-on for CUDA. While it does make your gameplay smoother and faster, it's a double edge sword by making your models loading time drastically slower for 1st time instances."* 
 
+## What is CUDA
+@mastere4 says, *"Cuda is pretty much just the better version of "DirectML" and uses Nvidia's GPU power to make it more smoother and faster"*
+
 ## Comparison between TensorRT and CUDA
 ```diff
 + TensorRT has a 5-10ms difference for me.
