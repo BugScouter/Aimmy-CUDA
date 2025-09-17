@@ -78,9 +78,12 @@ To run Aimmy you first need all of the dependencies which are
 - [.NET v7](https://download.visualstudio.microsoft.com/download/pr/e8b0aac4-7f86-4a7b-9a9a-448aa2b0f116/99a4178751b799db3d059b4b22b4451e/windowsdesktop-runtime-7.0.18-win-x64.exe)
 - [.NET v8](https://download.visualstudio.microsoft.com/download/pr/c1d08a81-6e65-4065-b606-ed1127a954d3/14fe55b8a73ebba2b05432b162ab3aa8/windowsdesktop-runtime-8.0.4-win-x64.exe)
 - [VCRedist](https://aka.ms/vs/17/release/vc_redist.x64.exe)
+- CUDA 12.x/CUDNN 9.x **(INCLUDED IN DLL-INCLUDED)**
+- TensorRT 10.x **(INCLUDED IN BOTH ZIPS)**
+
 Run "TotallyNotAimmyV2.exe". if you run "AimmyLauncher.exe" run it as admin.
 
-The reason for us asking you to use dll-included is because there can be so many difficulties making sure you have the correct versions, which is why I made it easier for all of you!
+The reason for us asking you to use dll-included is because there can be so many difficulties making sure you have the [correct versions](https://onnxruntime.ai/docs/execution-providers/TensorRT-ExecutionProvider.html#:~:text=CUDA-,main,12.0%2D12.8,-1.22), which is why I made it easier for all of you!
 
 
 **Join https://discord.gg/aimmy for extensive help, most likely in #community-support.**
