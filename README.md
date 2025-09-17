@@ -59,7 +59,13 @@ Here are some documentation proving speed of ONNX's EP's:
 Beware of credibility. 
 
 ## Need help?
-Before reaching out, make sure you have the **DLL-INCLUDED**, you will know because the zip file will say that it is dll-included. Also, please check the WIKI, it has all the answers to 99.99% of your problems.
+> [!IMPORTANT]
+> [CHECK THE WIKI!](https://github.com/TaylorIsBlue/Aimmy-CUDA/wiki)
+
+
+Before reaching out, make sure you have the **DLL-INCLUDED**, you will know because the zip file will say that it is dll-included.
+
+Also, please check the [WIKI](https://github.com/TaylorIsBlue/Aimmy-CUDA/wiki), it has all the answers to 99.99% of your problems.
 
 Aimmy will let you know if your aimmy won't work at startup, if the cuda files are missing, tensorrt files are missing, etc.
 
