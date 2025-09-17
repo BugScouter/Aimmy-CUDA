@@ -8,110 +8,70 @@
 
 Aimmy is a universal AI-Based Aim Alignment Mechanism developed by BabyHamsta, MarsQQ & Taylor to make gaming more accessible for users who have difficulty aiming.
 
-Unlike most AI-Based Aim Alignment Mechanisms, Aimmy utilizes DirectML, ONNX, and YOLOV8 to detect players, offering both higher accuracy and faster performance compared to other Aim Aligners, especially on AMD GPUs, which would not perform well on Aim Alignment Mechanisms that utilize TensorRT.
+> [!NOTE]
+> **I highly recommend you to use TensorRT, if your gpu is older and doesn't have Tensor Cores (Check this by googling), I suggest trying CUDA and then comparing to the regular [aimmy](https://github.com/BabyHamsta/Aimmy)**.
 
-Aimmy also provides an easy to use user-interface, a wide set of features and customizability options which makes Aimmy a great option for anyone who wants to use and tailor an Aim Alignment Mechanism for a specific game without having to code.
+> [!IMPORTANT]
+> DOWNLOAD the **DLL INCLUDED**!!! There is **no** performance difference
 
-Aimmy is 100% free to use. This means no ads, no key system, and no paywalled features. Aimmy is not, and will never be for sale for the end user, and is considered a source-available product, **not open source** as we actively discourage other developers from making commercial forks of Aimmy.
+> [!CAUTION]
+> No, CUDA/TensorRT does **NOT** work on your **AMD/INTEL GPU!!!**
 
-Please do not confuse Aimmy as an open-source project, we are not, and we have never been one.
+## What is TensorRT? 
+@mastere4 says, *"Pretty much an add-on for CUDA. While it does make your gameplay smoother and faster, it's a double edge sword by making your models loading time drastically slower for 1st time instances."* 
 
-Want to connect with us? Join our Discord Server: https://discord.gg/aimmy
+## Comparison between TensorRT and CUDA
+```diff
++ TensorRT has a 5-10ms difference for me.
++ TensorRT is guaranteed to optimize your model for better accuracy, and faster iteration times.
++ TensorRT optimizes a model and uses precision methods for accuracy.
++ TensorRT has a GPU Memory Limit
++ TensorRT has INT8 Precision and FP16 Precision.
+- TensorRT Caching takes a lot of space if you are optimizing a lot of models.
+- TensorRT takes way longer to load a model (for the 1st load), 384 - 60 seconds, but after caching, it'll take about 40-9 seconds.
+- ONNXRuntime's caching system is difficult, being way slower than the DLL i have created, but no way to use my DLL in conjuction with ONNXRuntime.
+- About 560MB, and extra installation (though quite simple)
 
-If you want to share Aimmy with your friends, our website is: https://aimmy.dev/
-
-## Table of Contents
-- [What is the purpose of Aimmy?](#what-is-the-purpose-of-aimmy)
-- [How does Aimmy Work?](#how-does-aimmy-work)
-- [Features](#features)
-- [Setup](#setup)
-- [How is Aimmy better than similar AI-Based tools?](#how-is-aimmy-better-than-similar-ai-based-tools)
-- [How the hell is Aimmy free?](#how-the-hell-is-aimmy-free)
-- [How do I train my own model?](#how-do-i-train-my-own-model)
-- [How do I upload my model to the "Downloadable Models" menu](ModelUpload.md)
-
-
-
-## What is the purpose of Aimmy?
-### Aimmy was designed for Gamers who are at a severe disadvantage over normal gamers.
-### This includes but is not limited to:
-- Gamers who are physically challenged
-- Gamers who are mentally challenged
-- Gamers who suffer from untreated/untreatable visual impairments
-- Gamers who do not have access to a seperate Human-Interface Device (HID) for controlling the pointer
-- Gamers trying to improve their reaction time
-- Gamers with poor Hand/Eye coordination
-- Gamers who perform poorly in FPS games
-- Gamers who play for long periods in hot environments, causing greasy hands that make aiming difficult 
-
-## How does Aimmy Work?
-```mermaid
-flowchart  LR
-A["Playing Game System"]
-C["Screen Grabbing Functionality"]
-B["YOLOv8 (DirectML + ONNX) Recognition"]
-D{Making Decision}
-DA["X+Y Adjustment"]
-DB["FOV"]
-E["Triggering Functionality"]
-F["Mouse Cursor"]
-
-A --> E--> C  -->  B  --> D --> F 
-DA  -->  D
-DB  -->  D
-
++ CUDA model loadtimes are almost instantaneous
++ CUDA also has a GPU Memory Limit
++ CUDA can use TF32 as a Math Mode.
++ CUDA is 560MB less than the TensorRT installation
+- CUDA does not have the optimizations that TensorRT provides
+- CUDA is approximately 10-5ms slower than TensorRT
 ```
-When you press the trigger binding, Aimmy will capture the screen and run the image through AI recognition powered by your computer hardware. The result it develops will be combined with any adjustment you made in the X and Y axis, and your current FOV and will result in a change in your mouse cursor position.
 
-## Features
-1. Full Fledged UI
-	- Aimmy provides a well designed and full-fledged UI for easy usage and game adjustment.
-2. DirectML + ONNX + YOLOv8 AI Detection Algorithm
-	- The use of these technologies allows Aimmy to be one of the most accurate and fastest Aim Alignment Mechanisms out there in the world
-3. Dynamic Customizability System
-	- Aimmy provides an interactive customizability system with various features that auto-updates the way Aimmy will aim as you customize. From AI Confidence, to FOV, to Anti-Recoil Adjustment, Aimmy makes it easy for anyone to tune their aim
-4. Dynamic Visual System
-	- Aimmy contains a universal ESP system that will highlight the player detected by the AI. This is helpful for visually impaired users who have a hard time differentiating enemies, and for configuration creators attempting to debug their configurations.
-5. Adjustable Anti-Recoil
-	- Aimmy offers an incredibly customizable Anti-Recoil system that's designed to be easy to use. With features like recording your Fire Rate, setting your X and Y adjustment, and Configuration Switch Keybindings
-6. Mouse Movement Method
-	- Aimmy grants you the right to switch between 5 Mouse Movement Methods depending on your Mouse Type and Game for better Aim Alignment
-7. Hotswappability
-	- Aimmy lets you hotswap models and configurations on the go. There is no need to reset Aimmy to make your changes
-8. Model and Configuration Store with Repository Support
-	- Aimmy makes it easy to get any models and configurations you may ever need, and with repository support, you can get up to date with the latest models and configurations from your favorite creators
+## How do I check my benchmarks?
+Our benchmarks appear while using Debug Mode, which you will find in the settings tab. Turn it on **before** loading a model to get more information. After closing aimmy or by loading another model, inside **debug.txt** you will find a large text telling you
+the _ms_ times for each function. The main one you should look at is most likely the AILoop Iteration Times, which is how long it takes to iterate through everything.
 
-## Setup
-- Download and Install the x64 version of [.NET Runtime 8.0.X.X](https://dotnet.microsoft.com/en-us/download/dotnet/thank-you/runtime-desktop-8.0.2-windows-x64-installer)
-- Download and Install the x64 version of [Visual C++ Redistributable](https://aka.ms/vs/17/release/vc_redist.x64.exe)
-- Download Aimmy from [Releases](releases) (Make sure it's the Aimmy zip and not Source zip)
-- Extract the Aimmy.zip file
-- Run Aimmy.exe
-- Choose your Model and Enjoy :)
+To get accurate Benchmarking times, play around a little in your favourite game with your favourite model. Use various confidences, etc.
 
-## How is Aimmy better than similar AI-Based tools?
-Aimmy is written in C# using .NET 8 and WPF utilizing pre-existing libraries like DirectML and ONNX. This has allowed us to make a very fast Aim Aligner with high compatiblity on both AMD and NVIDIA GPUs without sacrificing the end-user experience.
+## Optimization
+While the new 2.4.x version of Regular DirectML Aimmy is great and optimized, it is better to use CUDA/TensorRT where you can. I am very proud of the improvement and performance changes I have done using OnnxRuntimes CUDA package.
+I highly recommend any nvidia user to use CUDA unless their GPU/Benchmarking times prove that it is not worth so. But try it at least once.
+You can look through my code as well and see for yourself if it has mem leaks, slow code, messy organization etc. (I will gladly fix it if you let me know)
 
-![Example of Model switching](readme_assets/UI.gif?raw=true)
+Here are some documentation proving speed of ONNX's EP's:
+- **[COMPARISON BETWEEN CUDA, DIRECTML, AND TENSORRT](https://nietras.com/2021/01/25/onnxruntime/#:~:text=some%20warmup%20before.-,Execution%20Provider,1.56,-DirectML)** ⭐⭐⭐⭐⭐
+- [ONNX DOC](https://onnxruntime.ai/docs/execution-providers/TensorRT-ExecutionProvider.html#:~:text=With%20the%20TensorRT%20execution%20provider%2C%20the%20ONNX%20Runtime%20delivers%20better%20inferencing%20performance%20on%20the%20same%20hardware%20compared%20to%20generic%20GPU%20acceleration.)
+- [COMPARISON ARTICLE](https://medium.com/@sundarbalamurugan/comparision-between-tensorrt-pytorch-onnx-runtime-2842bd208d73)
 
-Beyond the core functionality, Aimmy also adds some amazing additional features like Detection ESP and Anti-Recoil to help you tune your gaming experience however you like it.
+Beware of credibility. 
 
-Aimmy comes pre-bundled with 2 well trained AI models with thousands of images each. 
-1. Phantom Forces
-2. Universal Model
+## Need help?
+Before reaching out, make sure you have the **DLL-INCLUDED**, you will know because the zip file will say that it is dll-included. Also, please check the WIKI, it has all the answers to 99.99% of your problems.
 
-Besides those 2 models, Aimmy provides dozens of other community made models through the store, with more models being developed every day by other Aimmy users. These models vary from game to image count, making Aimmy incredibly versatile and universal for thousands of games on the market right now.
+Aimmy will let you know if your aimmy won't work at startup, if the cuda files are missing, tensorrt files are missing, etc.
 
-## How the hell is Aimmy free?
-As an AI based Aim Aligner, Aimmy does not require any sort of upkeep because it does not read any specific game data to perform it's actions. If Aimmy team stops maintaining Aimmy, even if no one pitches in to fork and maintain the project, Aimmy would still work.
+This is also just the same as Regular Aimmy, you need the basic dependencies.
 
-This has meant that while we do currently use out of pocket expenses to run Aimmy, those expenses have been low enough that it hasn't been a necessity for Aimmy to run on even an ad-supported model.
+To run Aimmy you first need all of the dependencies which are 
+- [.NET v7](https://download.visualstudio.microsoft.com/download/pr/e8b0aac4-7f86-4a7b-9a9a-448aa2b0f116/99a4178751b799db3d059b4b22b4451e/windowsdesktop-runtime-7.0.18-win-x64.exe)
+- [.NET v8](https://download.visualstudio.microsoft.com/download/pr/c1d08a81-6e65-4065-b606-ed1127a954d3/14fe55b8a73ebba2b05432b162ab3aa8/windowsdesktop-runtime-8.0.4-win-x64.exe)
+- [VCRedist](https://aka.ms/vs/17/release/vc_redist.x64.exe)
+Run "TotallyNotAimmyV2.exe". if you run "AimmyLauncher.exe" run it as admin.
 
-We do not seek to make money from Aimmy, we only seek your kind words <3, and a chance to help people aim better, by assisting their aim or even to train how they aim (yes, you can use Aimmy in that way too)
+The reason for us asking you to use dll-included is because there can be so many difficulties making sure you have the correct versions, which is why I made it easier for all of you!
 
-## How do I train my own model
-Please see the video tutorial below on how to label images and train your own model. (Redirects to Youtube)
-[![Watch the video on Youtube](https://img.youtube.com/vi/i98wF4218-Q/maxresdefault.jpg)](https://youtu.be/i98wF4218-Q)
 
-## How do I upload my model to the "Downloadable Models" menu?
-Please read the tutorial at [UploadModel.md](ModelUpload.md)
+**Join https://discord.gg/aimmy for extensive help, most likely in #community-support.**
